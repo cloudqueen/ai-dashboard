@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
@@ -17,9 +18,10 @@ Route::get('/dashboard', function () {
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('/kanban', function () {
-        return Inertia::render('Kanban/Index');
-    })->name('kanban');
+    Route::get('/kanban', [KanbanController::class, 'index'])->name('kanban');
+    Route::patch('/api/kanban/move', [KanbanController::class, 'move'])->name('kanban.move');
+    Route::post('/api/kanban/tickets', [KanbanController::class, 'store'])->name('kanban.store');
+    Route::post('/api/kanban/promote', [KanbanController::class, 'promote'])->name('kanban.promote');
 
     Route::get('/vault', [VaultController::class, 'index'])->name('vault');
     Route::get('/vault/note/{path}', [VaultController::class, 'show'])->name('vault.show')->where('path', '.*');
