@@ -1,8 +1,9 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
+// Vault sync - pull remote changes, push local changes
+Schedule::command('vault:sync')->everyFiveMinutes();
+
+// Vault re-index - safety net for changed files
+Schedule::command('vault:index --changed-only')->everyThirtyMinutes();

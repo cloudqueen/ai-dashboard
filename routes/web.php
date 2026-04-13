@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
-use Illuminate\Foundation\Application;
+use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -21,9 +21,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         return Inertia::render('Kanban/Index');
     })->name('kanban');
 
-    Route::get('/vault', function () {
-        return Inertia::render('Vault/Index');
-    })->name('vault');
+    Route::get('/vault', [VaultController::class, 'index'])->name('vault');
+    Route::get('/vault/note/{path}', [VaultController::class, 'show'])->name('vault.show')->where('path', '.*');
+    Route::post('/vault/notes', [VaultController::class, 'store'])->name('vault.store');
+    Route::patch('/vault/notes', [VaultController::class, 'update'])->name('vault.update');
+    Route::get('/api/vault/search', [VaultController::class, 'search'])->name('vault.search');
+    Route::post('/vault/sync', [VaultController::class, 'sync'])->name('vault.sync');
 
     Route::get('/agents', function () {
         return Inertia::render('Agents/Index');
