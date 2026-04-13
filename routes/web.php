@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AgentController;
 use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\VaultController;
@@ -30,9 +31,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/api/vault/search', [VaultController::class, 'search'])->name('vault.search');
     Route::post('/vault/sync', [VaultController::class, 'sync'])->name('vault.sync');
 
-    Route::get('/agents', function () {
-        return Inertia::render('Agents/Index');
-    })->name('agents');
+    Route::get('/agents', [AgentController::class, 'index'])->name('agents');
+    Route::get('/agents/{agentRun}', [AgentController::class, 'show'])->name('agents.show');
+    Route::post('/api/agents/run', [AgentController::class, 'triggerRun'])->name('agents.run');
+    Route::get('/api/agents/status', [AgentController::class, 'status'])->name('agents.status');
 
     Route::get('/settings', function () {
         return Inertia::render('Settings/Index');

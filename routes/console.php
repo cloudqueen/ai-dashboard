@@ -7,3 +7,6 @@ Schedule::command('vault:sync')->everyFiveMinutes();
 
 // Vault re-index - safety net for changed files
 Schedule::command('vault:index --changed-only')->everyThirtyMinutes();
+
+// Agent heartbeat - check for ready tickets and process completions
+Schedule::command('agent:heartbeat')->everyThreeMinutes();
