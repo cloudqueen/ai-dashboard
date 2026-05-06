@@ -36,6 +36,7 @@ return [
         'heartbeat_minutes' => (int) env('AGENT_HEARTBEAT_MINUTES', 3),
         'timeout_minutes' => (int) env('AGENT_TIMEOUT_MINUTES', 30),
         'output_format' => 'json',
+        'monthly_budget_usd' => env('AGENT_MONTHLY_BUDGET_USD'),
     ],
 
     /*

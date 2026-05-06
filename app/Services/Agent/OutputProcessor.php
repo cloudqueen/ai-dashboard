@@ -32,9 +32,24 @@ class OutputProcessor
             'created_at' => Carbon::now()->toIso8601String(),
         ];
 
-        $body = "# Agent Output: {$ticketTitle} (Run #{$run->id})\n\n";
-        $body .= "## Summary\n\n" . ($run->summary ?? 'No summary available.') . "\n\n";
-        $body .= "## Full Output\n\n" . ($run->raw_output ?? '') . "\n";
+        // Extract clean text from raw output (may be JSON)
+        $cleanOutput = $run->summary ?? '';
+        if ($run->raw_output) {
+            $parsed = json_decode($run->raw_output, true);
+            if (is_array($parsed) && isset($parsed['result'])) {
+                $cleanOutput = $parsed['result'];
+            } elseif (! is_array($parsed)) {
+                // raw_output is plain text
+                $cleanOutput = $run->raw_output;
+            }
+        }
+
+        $body = "# Agent Output: {$ticketTitle}\n\n";
+        $body .= "- Skill: {$run->skill}\n";
+        $body .= "- Run: #{$run->id}\n";
+        $body .= "- Dauer: {$run->duration_seconds}s\n\n";
+        $body .= "---\n\n";
+        $body .= $cleanOutput . "\n";
 
         $relativePath = $this->vault->createNote(
             $outputFolder,
@@ -48,10 +63,21 @@ class OutputProcessor
 
         // Update the source ticket to link the output and move to review
         if ($run->ticket_path) {
-            $this->vault->updateFrontmatter($run->ticket_path, [
-                'status' => 'review',
-                'updated_at' => Carbon::now()->toIso8601String(),
-            ]);
+            try {
+                $this->vault->updateFrontmatter($run->ticket_path, [
+                    'status' => 'review',
+                    'agent_output' => '[[' . basename($relativePath, '.md') . ']]',
+                    'updated_at' => Carbon::now()->toIso8601String(),
+                ]);
+                // Ensure the DB index is updated too
+                $this->vault->indexNote($run->ticket_path);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to update ticket after agent run', [
+                    'run_id' => $run->id,
+                    'ticket' => $run->ticket_path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

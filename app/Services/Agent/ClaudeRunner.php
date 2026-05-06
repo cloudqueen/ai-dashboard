@@ -10,17 +10,26 @@ class ClaudeRunner
     /**
      * Execute a prompt via the Claude CLI.
      */
-    public function run(string $prompt, int $timeoutSeconds = 1800): AgentOutput
+    public function run(string $prompt, int $timeoutSeconds = 1800, ?string $model = null): AgentOutput
     {
         $cliPath = config('dashboard.agent.cli_path', 'claude');
         $startTime = microtime(true);
 
+        $command = [
+            $cliPath,
+            '-p', $prompt,
+            '--output-format', 'json',
+            '--allowedTools', 'WebSearch', 'WebFetch', 'Read', 'Grep', 'Glob',
+        ];
+
+        if ($model) {
+            $command[] = '--model';
+            $command[] = $model;
+        }
+
         $result = Process::timeout($timeoutSeconds)
-            ->run([
-                $cliPath,
-                '-p', $prompt,
-                '--output-format', 'json',
-            ]);
+            ->path(base_path())
+            ->run($command);
 
         $duration = (int) (microtime(true) - $startTime);
 
@@ -43,11 +52,35 @@ class ClaudeRunner
         // Try to parse JSON output
         $parsed = json_decode($rawOutput, true);
         $summary = null;
+        $tokensUsed = null;
 
         if (is_array($parsed)) {
-            $summary = $parsed['result'] ?? $parsed['summary'] ?? null;
-            if (is_array($summary)) {
-                $summary = json_encode($summary);
+            $resultText = $parsed['result'] ?? $parsed['summary'] ?? null;
+            if (is_array($resultText)) {
+                $resultText = json_encode($resultText, JSON_UNESCAPED_UNICODE);
+            }
+            $summary = $resultText ? mb_substr($resultText, 0, 2000) : null;
+
+            // Extract token usage
+            $usage = $parsed['usage'] ?? [];
+            $tokensUsed = ($usage['input_tokens'] ?? 0) + ($usage['output_tokens'] ?? 0);
+
+            // Track cost
+            if (! empty($usage)) {
+                try {
+                    \App\Models\CostEvent::create([
+                        'source' => 'agent',
+                        'model' => array_key_first($parsed['modelUsage'] ?? ['unknown' => null]),
+                        'input_tokens' => $usage['input_tokens'] ?? 0,
+                        'output_tokens' => $usage['output_tokens'] ?? 0,
+                        'cache_read_tokens' => $usage['cache_read_input_tokens'] ?? 0,
+                        'cache_creation_tokens' => $usage['cache_creation_input_tokens'] ?? 0,
+                        'cost_usd' => $parsed['total_cost_usd'] ?? null,
+                        'occurred_at' => now(),
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('Failed to track agent cost', ['error' => $e->getMessage()]);
+                }
             }
         } else {
             // If not JSON, use the raw text as the summary
@@ -58,6 +91,7 @@ class ClaudeRunner
             success: true,
             rawOutput: $rawOutput,
             summary: $summary,
+            tokensUsed: $tokensUsed,
             durationSeconds: $duration,
         );
     }
