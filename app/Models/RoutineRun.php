@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class RoutineRun extends Model
 {
     protected $fillable = [
-        'routine_id', 'agent_run_id', 'ticket_path', 'status',
+        'routine_id', 'agent_run_id', 'ticket_id', 'ticket_path', 'status',
         'summary', 'output_note_path', 'started_at', 'completed_at',
     ];
 
@@ -28,5 +28,10 @@ class RoutineRun extends Model
     public function agentRun(): BelongsTo
     {
         return $this->belongsTo(AgentRun::class);
+    }
+
+    public function ticket(): BelongsTo
+    {
+        return $this->belongsTo(Ticket::class);
     }
 }
