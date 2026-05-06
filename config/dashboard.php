@@ -13,16 +13,19 @@ return [
         'git_remote' => env('VAULT_GIT_REMOTE'),
         'sync_enabled' => env('VAULT_SYNC_ENABLED', true),
         'sync_branch' => env('VAULT_SYNC_BRANCH', 'main'),
-        'folders' => [
-            'agent_outputs' => 'agent/outputs',
-            'agent_logs' => 'agent/logs',
-            'inbox' => 'inbox',
-            'email' => 'email',
-            'psychology' => 'psychology',
-            'templates' => 'templates',
-            'daily' => 'daily',
-            'skills' => 'skills',
-        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Dashboard Storage (own folders, outside the vault)
+    |--------------------------------------------------------------------------
+    | Paths are resolved via Storage::disk('local'), i.e. relative to
+    | storage/app/.
+    */
+
+    'storage' => [
+        'agent_outputs' => 'dashboard/agent-outputs',
+        'skills' => 'dashboard/skills',
     ],
 
     /*

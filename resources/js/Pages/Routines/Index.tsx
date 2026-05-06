@@ -271,7 +271,7 @@ function CreateRoutineForm({ skills, onClose }: { skills: Skill[]; onClose: () =
                         >
                             {skills.map((s) => (
                                 <option key={s.name} value={s.name}>
-                                    {s.display_name}{s.source === 'vault' ? ' (vault)' : ''}
+                                    {s.display_name}{s.source === 'file' ? ' (file)' : ''}
                                 </option>
                             ))}
                         </select>

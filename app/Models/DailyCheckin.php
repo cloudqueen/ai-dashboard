@@ -15,7 +15,6 @@ class DailyCheckin extends Model
         'plan',
         'motto_goal',
         'summary',
-        'vault_note_path',
         'completed_at',
     ];
 

@@ -38,7 +38,6 @@ class TicketService
 
         TaskEvent::create([
             'ticket_id' => $ticket->id,
-            'ticket_path' => null,
             'event_type' => 'created',
             'to_status' => $ticket->status,
         ]);
@@ -93,7 +92,6 @@ class TicketService
 
         TaskEvent::create([
             'ticket_id' => $ticket->id,
-            'ticket_path' => null,
             'event_type' => $isPostpone ? 'postponed' : 'status_changed',
             'from_status' => $oldStatus,
             'to_status' => $newStatus,

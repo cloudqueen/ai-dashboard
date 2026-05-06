@@ -370,7 +370,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
             .then((skills: { name: string; display_name: string; source: string }[]) => {
                 setAvailableSkills([
                     { value: '', label: 'Auto-detect' },
-                    ...skills.map((s) => ({ value: s.name, label: `${s.display_name}${s.source === 'vault' ? ' (vault)' : ''}` })),
+                    ...skills.map((s) => ({ value: s.name, label: `${s.display_name}${s.source === 'file' ? ' (file)' : ''}` })),
                 ]);
             })
             .catch(() => {});

@@ -139,8 +139,6 @@ class VaultManager
         $parsed = $this->parser->parse($content);
         $hash = hash('sha256', $content);
 
-        $fm = $parsed->frontmatter;
-
         return VaultNote::updateOrCreate(
             ['relative_path' => $relativePath],
             [
@@ -148,14 +146,8 @@ class VaultManager
                     ? $parsed->title()
                     : pathinfo($relativePath, PATHINFO_FILENAME),
                 'vault_folder' => dirname($relativePath),
-                'frontmatter' => $fm,
+                'frontmatter' => $parsed->frontmatter,
                 'body_preview' => Str::limit($parsed->body, 500),
-                'status' => $fm['status'] ?? null,
-                'priority' => $fm['priority'] ?? null,
-                'type' => $fm['type'] ?? null,
-                'assigned_to' => $fm['assigned_to'] ?? null,
-                'tags' => $fm['tags'] ?? null,
-                'due_date' => $fm['due_date'] ?? null,
                 'content_hash' => $hash,
                 'vault_modified_at' => \Carbon\Carbon::createFromTimestamp(filemtime($fullPath)),
             ]

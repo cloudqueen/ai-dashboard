@@ -11,7 +11,6 @@ class PsychIntervention extends Model
         'intervention_type',
         'trigger',
         'ticket_id',
-        'ticket_path',
         'content',
         'metadata',
         'was_helpful',

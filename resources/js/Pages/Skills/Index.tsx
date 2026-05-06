@@ -6,7 +6,7 @@ interface Skill {
     name: string;
     display_name: string;
     description: string;
-    source: 'vault' | 'database';
+    source: 'file' | 'database';
     model: string | null;
     references: { path: string; name: string }[];
 }
@@ -33,7 +33,7 @@ export default function SkillsIndex({ skills }: Props) {
         } catch { /* ignore */ }
     };
 
-    const vaultSkills = skills.filter((s) => s.source === 'vault');
+    const fileSkills = skills.filter((s) => s.source === 'file');
     const dbSkills = skills.filter((s) => s.source === 'database');
 
     return (
@@ -57,12 +57,12 @@ export default function SkillsIndex({ skills }: Props) {
             <div className="flex gap-6">
                 {/* Skills list */}
                 <div className="flex-1">
-                    {/* Vault skills */}
-                    {vaultSkills.length > 0 && (
+                    {/* File skills (storage/app/dashboard/skills) */}
+                    {fileSkills.length > 0 && (
                         <div className="mb-6">
-                            <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-500">Vault Skills</h3>
+                            <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-500">Custom Skills</h3>
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                                {vaultSkills.map((skill) => (
+                                {fileSkills.map((skill) => (
                                     <SkillCard
                                         key={skill.name}
                                         skill={skill}
@@ -115,7 +115,7 @@ export default function SkillsIndex({ skills }: Props) {
 
                             <div className="mb-3 flex flex-wrap gap-1.5">
                                 <span className={`rounded-md px-2 py-0.5 text-[10px] ${
-                                    selectedSkill.source === 'vault'
+                                    selectedSkill.source === 'file'
                                         ? 'bg-teal-900/30 text-teal-400'
                                         : 'bg-gray-800 text-gray-400'
                                 }`}>
@@ -183,11 +183,11 @@ function SkillCard({ skill, isSelected, onClick }: { skill: Skill; isSelected: b
             <div className="flex items-start justify-between">
                 <h4 className="text-sm font-medium text-gray-200">{skill.display_name}</h4>
                 <span className={`rounded px-1.5 py-0.5 text-[9px] ${
-                    skill.source === 'vault'
+                    skill.source === 'file'
                         ? 'bg-teal-900/30 text-teal-400'
                         : 'bg-gray-800 text-gray-500'
                 }`}>
-                    {skill.source === 'vault' ? 'vault' : 'db'}
+                    {skill.source === 'file' ? 'file' : 'db'}
                 </span>
             </div>
             {skill.description && (
@@ -220,7 +220,7 @@ function CreateSkillForm({ onClose }: { onClose: () => void }) {
     return (
         <div className="mb-6 rounded-xl border border-gray-800 bg-gray-900 p-6">
             <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-gray-200">Neuer Vault Skill</h3>
+                <h3 className="text-sm font-medium text-gray-200">Neuer Skill</h3>
                 <button onClick={onClose} className="text-gray-500 hover:text-gray-300">
                     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -270,7 +270,7 @@ function CreateSkillForm({ onClose }: { onClose: () => void }) {
                 </div>
             </form>
             <p className="mt-3 text-[10px] text-gray-600">
-                Erstellt einen Ordner <code className="text-gray-500">skills/{data.name || '...'}/SKILL.md</code> im Vault. Du kannst dort Referenzdateien hinzufügen.
+                Erstellt einen Ordner <code className="text-gray-500">storage/app/dashboard/skills/{data.name || '...'}/SKILL.md</code>. Du kannst dort Referenzdateien hinzufügen.
             </p>
         </div>
     );

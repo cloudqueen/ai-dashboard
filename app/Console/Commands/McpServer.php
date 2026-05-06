@@ -406,42 +406,7 @@ class McpServer extends Command
             'completed_at' => now(),
         ]);
 
-        // Save to vault
-        $vault = app(VaultManager::class);
-        $date = today()->format('Y-m-d');
-        $folder = config('dashboard.vault.folders.daily', 'Daily');
-        $relativePath = "{$folder}/{$date}.md";
-
-        $frontmatter = [
-            'date' => $date,
-            'mood' => $checkin->mood,
-            'energy' => $checkin->energy,
-            'motto_goal' => $checkin->motto_goal,
-            'tags' => ['daily', 'checkin'],
-        ];
-
-        $body = "# {$date}\n\n";
-        if ($checkin->motto_goal) $body .= "## Motto-Ziel\n> {$checkin->motto_goal}\n\n";
-        if ($checkin->mood) $body .= "## Check-in\n- Stimmung: {$checkin->mood}\n- Energie: {$checkin->energy}/5\n\n";
-        if ($checkin->summary) $body .= "## Zusammenfassung\n{$checkin->summary}\n\n";
-        if (! empty($plan)) {
-            $body .= "## Tagesplan\n";
-            foreach ($plan as $item) {
-                $task = is_array($item) ? ($item['task'] ?? '') : $item;
-                $body .= "- [ ] {$task}\n";
-            }
-        }
-
-        $existing = $vault->readNote($relativePath);
-        if ($existing) {
-            $vault->writeNote($relativePath, $frontmatter, $body);
-        } else {
-            $vault->createNote($folder, $date, $frontmatter, $body);
-        }
-
-        $checkin->update(['vault_note_path' => $relativePath]);
-
-        return "Check-in gespeichert als {$relativePath}\nStimmung: {$checkin->mood}, Energie: {$checkin->energy}/5\nMotto: {$checkin->motto_goal}";
+        return "Check-in gespeichert.\nStimmung: {$checkin->mood}, Energie: {$checkin->energy}/5\nMotto: {$checkin->motto_goal}";
     }
 
     private function toolGetBiography(array $args): string

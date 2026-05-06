@@ -45,7 +45,8 @@ class OutputProcessor
         $body .= "---\n\n";
         $body .= $cleanOutput . "\n";
 
-        $relativePath = "dashboard/agent-outputs/{$date}-{$run->id}-{$slug}.md";
+        $folder = config('dashboard.storage.agent_outputs', 'dashboard/agent-outputs');
+        $relativePath = "{$folder}/{$date}-{$run->id}-{$slug}.md";
         Storage::disk('local')->put($relativePath, $body);
 
         $run->update(['output_note_path' => $relativePath]);
