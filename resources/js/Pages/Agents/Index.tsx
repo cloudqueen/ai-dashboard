@@ -3,7 +3,8 @@ import { Head, Link } from '@inertiajs/react';
 
 interface AgentRun {
     id: number;
-    ticket_path: string | null;
+    ticket_id: number | null;
+    ticket: { id: number; title: string } | null;
     skill: string;
     status: string;
     summary: string | null;
@@ -83,7 +84,7 @@ export default function AgentsIndex({ runs, activeCount, skills }: Props) {
                                             </Link>
                                         </td>
                                         <td className="px-4 py-3 text-sm text-gray-400 truncate max-w-[200px]">
-                                            {run.ticket_path ? run.ticket_path.replace(/\.md$/, '').split('/').pop() : '-'}
+                                            {run.ticket ? run.ticket.title : '-'}
                                         </td>
                                         <td className="px-4 py-3">
                                             <span className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300">{run.skill}</span>

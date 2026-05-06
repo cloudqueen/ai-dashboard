@@ -1,5 +1,5 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Head, Link } from '@inertiajs/react';
+import { Head } from '@inertiajs/react';
 import { useState, useRef, useEffect } from 'react';
 
 interface TicketSuggestion {
@@ -28,7 +28,6 @@ interface Checkin {
     plan: { task: string; priority: string }[] | null;
     motto_goal: string | null;
     summary: string | null;
-    vault_note_path: string | null;
     completed_at: string | null;
 }
 
@@ -264,14 +263,6 @@ export default function DailyIndex({ checkin: initialCheckin }: Props) {
                             </span>
                         )}
                         {checkin.energy && <EnergyIndicator level={checkin.energy} />}
-                        {isCompleted && checkin.vault_note_path && (
-                            <Link
-                                href={route('vault.show', { path: checkin.vault_note_path })}
-                                className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs text-indigo-400 hover:bg-gray-700"
-                            >
-                                Notiz anzeigen
-                            </Link>
-                        )}
                     </div>
                 </div>
             }
@@ -357,11 +348,6 @@ export default function DailyIndex({ checkin: initialCheckin }: Props) {
                 {isCompleted && (
                     <div className="mt-4 rounded-xl border border-green-800/50 bg-green-900/10 p-4 text-center">
                         <p className="text-sm text-green-400">Check-in abgeschlossen</p>
-                        {checkin.vault_note_path && (
-                            <p className="mt-1 text-xs text-gray-500">
-                                Gespeichert als {checkin.vault_note_path}
-                            </p>
-                        )}
                     </div>
                 )}
 

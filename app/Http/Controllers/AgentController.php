@@ -13,7 +13,8 @@ class AgentController extends Controller
 {
     public function index()
     {
-        $runs = AgentRun::orderBy('created_at', 'desc')
+        $runs = AgentRun::with('ticket:id,title')
+            ->orderBy('created_at', 'desc')
             ->paginate(25);
 
         $activeCount = AgentRun::active()->count();

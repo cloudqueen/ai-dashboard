@@ -35,8 +35,8 @@ interface UsageStats {
 interface Props {
     vaultConfigured: boolean;
     kanbanSummary: { key: string; label: string; count: number }[];
-    dueSoon: { title: string; relative_path: string; due_date: string; priority: string; status: string }[];
-    agentStatus: { active: number; recent: { id: number; skill: string; status: string; created_at: string }[] };
+    dueSoon: { id: number; title: string; due_date: string; priority: string; status: string }[];
+    agentStatus: { active: number; recent: { id: number; skill: string; status: string; created_at: string; ticket: { id: number; title: string } | null }[] };
     recentActivity: { actor_type: string; action: string; entity_type: string; entity_id: string | null; details: Record<string, unknown> | null; created_at: string }[];
     psychInsights: PsychInsights | null;
     usageStats: UsageStats | null;
@@ -196,7 +196,7 @@ export default function Dashboard({ vaultConfigured, kanbanSummary, dueSoon, age
                     {dueSoon.length > 0 ? (
                         <div className="space-y-2">
                             {dueSoon.map((t) => (
-                                <Link key={t.relative_path} href={route('vault.show', { path: t.relative_path })} className="block text-xs hover:bg-gray-800/50 rounded px-1 py-1">
+                                <Link key={t.id} href={route('kanban')} className="block text-xs hover:bg-gray-800/50 rounded px-1 py-1">
                                     <div className="flex items-center justify-between">
                                         <span className="text-gray-300 truncate">{t.title}</span>
                                         <span className="text-gray-500 flex-shrink-0 ml-2">{t.due_date}</span>

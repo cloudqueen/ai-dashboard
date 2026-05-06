@@ -3,7 +3,7 @@ import { Head, Link } from '@inertiajs/react';
 
 interface AgentRun {
     id: number;
-    ticket_path: string | null;
+    ticket_id: number | null;
     skill: string;
     status: string;
     prompt: string | null;
@@ -16,7 +16,7 @@ interface AgentRun {
     started_at: string | null;
     completed_at: string | null;
     created_at: string;
-    vault_note: { title: string; relative_path: string } | null;
+    ticket: { id: number; title: string; status: string } | null;
 }
 
 interface Props {
@@ -84,30 +84,23 @@ export default function AgentShow({ run }: Props) {
                                 <dt className="text-xs text-gray-500">Skill</dt>
                                 <dd><span className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300">{run.skill}</span></dd>
                             </div>
-                            {run.vault_note && (
+                            {run.ticket && (
                                 <div>
                                     <dt className="text-xs text-gray-500">Source Ticket</dt>
                                     <dd>
                                         <Link
-                                            href={route('vault.show', { path: run.vault_note.relative_path })}
+                                            href={route('kanban')}
                                             className="text-xs text-indigo-400 hover:text-indigo-300"
                                         >
-                                            {run.vault_note.title}
+                                            #{run.ticket.id} {run.ticket.title}
                                         </Link>
                                     </dd>
                                 </div>
                             )}
                             {run.output_note_path && (
                                 <div>
-                                    <dt className="text-xs text-gray-500">Output Note</dt>
-                                    <dd>
-                                        <Link
-                                            href={route('vault.show', { path: run.output_note_path })}
-                                            className="text-xs text-indigo-400 hover:text-indigo-300"
-                                        >
-                                            View in vault
-                                        </Link>
-                                    </dd>
+                                    <dt className="text-xs text-gray-500">Output File</dt>
+                                    <dd className="text-xs text-gray-400 break-all">{run.output_note_path}</dd>
                                 </div>
                             )}
                             {run.duration_seconds !== null && (

@@ -66,10 +66,32 @@ class KanbanController extends Controller
         $ticket = Ticket::findOrFail($id);
         $contextLinks = $kanban->getContextLinks($ticket);
 
+        $depIds = $ticket->depends_on ?? [];
+        $dependencies = empty($depIds) ? [] : Ticket::whereIn('id', $depIds)
+            ->get(['id', 'title', 'status'])
+            ->toArray();
+
         return response()->json([
             'ticket' => $ticket,
             'contextLinks' => $contextLinks,
+            'dependencies' => $dependencies,
         ]);
+    }
+
+    public function searchTickets(Request $request)
+    {
+        $q = trim((string) $request->input('q', ''));
+        if (mb_strlen($q) < 2) {
+            return response()->json([]);
+        }
+
+        return response()->json(
+            Ticket::query()
+                ->where('title', 'LIKE', '%' . $q . '%')
+                ->orderBy('title')
+                ->limit(15)
+                ->get(['id', 'title', 'status'])
+        );
     }
 
     public function addLink(Request $request, TicketService $tickets)

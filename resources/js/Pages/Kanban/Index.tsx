@@ -5,22 +5,29 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface Ticket {
     id: number;
-    relative_path: string;
     title: string;
+    description: string | null;
     type: string | null;
     status: string;
     priority: string | null;
     assigned_to: string | null;
+    agent_skill: string | null;
+    model: string | null;
     tags: string[] | null;
     due_date: string | null;
-    body_preview: string | null;
-    frontmatter: Record<string, unknown> | null;
+    emotional_charge: string | null;
+    system_level: number | null;
+    postpone_count: number;
+    context_links: string[] | null;
+    depends_on: number[] | null;
+    routine_id: number | null;
+    source_vault_note_id: number | null;
 }
 
 interface ContextLink {
     relative_path: string;
     title: string;
-    vault_folder: string;
+    vault_folder: string | null;
 }
 
 interface VaultSearchResult {
@@ -28,6 +35,18 @@ interface VaultSearchResult {
     relative_path: string;
     title: string;
     vault_folder: string;
+}
+
+interface TicketSearchResult {
+    id: number;
+    title: string;
+    status: string;
+}
+
+interface DependencyTicket {
+    id: number;
+    title: string;
+    status: string;
 }
 
 interface Column {
@@ -40,7 +59,6 @@ interface Props {
     columns: Record<string, Column>;
     filterOptions: { tags: string[]; assignees: string[] };
     filters: Record<string, string>;
-    vaultConfigured: boolean;
 }
 
 const priorityColors: Record<string, string> = {
@@ -56,26 +74,21 @@ function formatDateDe(dateStr: string): string {
     try {
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return dateStr;
-        const hasTime = dateStr.includes('T') || dateStr.includes(':');
-        const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-        if (hasTime) { opts.hour = '2-digit'; opts.minute = '2-digit'; }
-        return d.toLocaleDateString('de-DE', opts);
+        return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
     } catch { return dateStr; }
 }
 
-export default function KanbanIndex({ columns, filterOptions, filters, vaultConfigured }: Props) {
+export default function KanbanIndex({ columns }: Props) {
     const [localColumns, setLocalColumns] = useState(columns);
     const [showNewTicket, setShowNewTicket] = useState(false);
     const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
     const [interventionToast, setInterventionToast] = useState<{ id: number; framework: string; intervention_type: string; content: string } | null>(null);
     const flash = usePage().props.flash as Record<string, unknown> | undefined;
 
-    // Sync localColumns when server-side columns change (after link/unlink)
     useEffect(() => {
         setLocalColumns(columns);
     }, [columns]);
 
-    // Show intervention toast from flash data
     useEffect(() => {
         if (flash?.intervention) {
             setInterventionToast(flash.intervention as typeof interventionToast);
@@ -115,7 +128,7 @@ export default function KanbanIndex({ columns, filterOptions, filters, vaultConf
         setLocalColumns(newColumns);
 
         router.patch(route('kanban.move'), {
-            path: draggableId,
+            id: Number(draggableId),
             status: destination.droppableId,
         }, {
             preserveState: true,
@@ -123,17 +136,6 @@ export default function KanbanIndex({ columns, filterOptions, filters, vaultConf
             onError: () => setLocalColumns(columns),
         });
     };
-
-    if (!vaultConfigured) {
-        return (
-            <AuthenticatedLayout header={<h2 className="text-xl font-semibold leading-tight text-gray-200">Kanban Board</h2>}>
-                <Head title="Kanban" />
-                <div className="rounded-xl border border-gray-800 bg-gray-900 p-12 text-center">
-                    <p className="text-sm text-gray-500">Connect your vault in Settings to use the Kanban board.</p>
-                </div>
-            </AuthenticatedLayout>
-        );
-    }
 
     return (
         <AuthenticatedLayout
@@ -178,7 +180,6 @@ export default function KanbanIndex({ columns, filterOptions, filters, vaultConf
                 />
             )}
 
-            {/* Psychology intervention toast */}
             {interventionToast && (
                 <div className="fixed bottom-6 right-6 z-50 max-w-md animate-slide-up">
                     <div className={`rounded-xl border p-5 shadow-2xl ${
@@ -194,10 +195,7 @@ export default function KanbanIndex({ columns, filterOptions, filters, vaultConf
                             }`}>
                                 {interventionToast.framework === 'chimp' ? 'Chimp Paradox' : 'ZRM'}
                             </span>
-                            <button
-                                onClick={() => setInterventionToast(null)}
-                                className="text-gray-600 hover:text-gray-400"
-                            >
+                            <button onClick={() => setInterventionToast(null)} className="text-gray-600 hover:text-gray-400">
                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                 </svg>
@@ -258,7 +256,7 @@ function KanbanColumn({ column, onCardClick }: { column: Column; onCardClick: (t
                     >
                         {column.tickets.map((ticket, index) => (
                             <KanbanCard
-                                key={ticket.relative_path}
+                                key={ticket.id}
                                 ticket={ticket}
                                 index={index}
                                 onClick={() => onCardClick(ticket)}
@@ -277,10 +275,10 @@ function KanbanColumn({ column, onCardClick }: { column: Column; onCardClick: (t
 
 function KanbanCard({ ticket, index, onClick }: { ticket: Ticket; index: number; onClick: () => void }) {
     const priorityClass = priorityColors[ticket.priority ?? 'medium'] ?? priorityColors.medium;
-    const contextLinks = (ticket.frontmatter?.context_links as string[] | undefined) ?? [];
+    const linkCount = ticket.context_links?.length ?? 0;
 
     return (
-        <Draggable draggableId={ticket.relative_path} index={index}>
+        <Draggable draggableId={String(ticket.id)} index={index}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
@@ -312,9 +310,9 @@ function KanbanCard({ ticket, index, onClick }: { ticket: Ticket; index: number;
                                 {formatDateDe(ticket.due_date)}
                             </span>
                         )}
-                        {contextLinks.length > 0 && (
+                        {linkCount > 0 && (
                             <span className="rounded bg-indigo-900/30 px-1.5 py-0.5 text-[10px] text-indigo-400">
-                                {contextLinks.length} linked
+                                {linkCount} linked
                             </span>
                         )}
                     </div>
@@ -335,55 +333,36 @@ function KanbanCard({ ticket, index, onClick }: { ticket: Ticket; index: number;
 
 const AVAILABLE_MODELS = [
     { value: '', label: 'Default' },
-    { value: 'claude-opus-4-6', label: 'Opus 4.6' },
+    { value: 'claude-opus-4-7', label: 'Opus 4.7' },
     { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
     { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
 ];
 
 function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () => void }) {
     const [contextLinks, setContextLinks] = useState<ContextLink[]>([]);
-    const [dependencies, setDependencies] = useState<ContextLink[]>([]);
+    const [dependencies, setDependencies] = useState<DependencyTicket[]>([]);
     const [loading, setLoading] = useState(true);
     const [availableSkills, setAvailableSkills] = useState<{ value: string; label: string }[]>([{ value: '', label: 'Auto-detect' }]);
-    const [model, setModel] = useState<string>((ticket.frontmatter?.model as string) ?? '');
-    const [agentSkill, setAgentSkill] = useState<string>((ticket.frontmatter?.agent_skill as string) ?? '');
-    const dependsOnPaths = (ticket.frontmatter?.depends_on as string[]) ?? [];
+    const [model, setModel] = useState<string>(ticket.model ?? '');
+    const [agentSkill, setAgentSkill] = useState<string>(ticket.agent_skill ?? '');
+    const dependsOnIds = ticket.depends_on ?? [];
 
     const fetchTicketData = useCallback(() => {
-        fetch(route('kanban.show', { path: ticket.relative_path }), {
+        fetch(route('kanban.show', { id: ticket.id }), {
             headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         })
             .then((res) => res.json())
             .then((data) => {
                 setContextLinks(data.contextLinks ?? []);
-                // Resolve dependency titles
-                const deps = (data.ticket?.frontmatter?.depends_on ?? []) as string[];
-                if (deps.length > 0) {
-                    // Fetch dependency info from the ticket data we already have
-                    Promise.all(
-                        deps.map((p: string) =>
-                            fetch(route('kanban.show', { path: p }), {
-                                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                            })
-                                .then((r) => r.json())
-                                .then((d) => ({
-                                    relative_path: d.ticket.relative_path,
-                                    title: d.ticket.title,
-                                    vault_folder: d.ticket.vault_folder,
-                                }))
-                                .catch(() => null)
-                        )
-                    ).then((results) => setDependencies(results.filter(Boolean) as ContextLink[]));
-                }
+                setDependencies(data.dependencies ?? []);
                 setLoading(false);
             })
             .catch(() => setLoading(false));
-    }, [ticket.relative_path]);
+    }, [ticket.id]);
 
     useEffect(() => {
         setLoading(true);
         fetchTicketData();
-        // Load available skills for dropdown
         fetch(route('skills.list'), {
             headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         })
@@ -399,7 +378,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
 
     const handleAddLink = (notePath: string) => {
         router.post(route('kanban.link'), {
-            ticket_path: ticket.relative_path,
+            ticket_id: ticket.id,
             link_path: notePath,
         }, {
             preserveState: true,
@@ -410,10 +389,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
 
     const handleRemoveLink = (notePath: string) => {
         router.delete(route('kanban.unlink'), {
-            data: {
-                ticket_path: ticket.relative_path,
-                link_path: notePath,
-            },
+            data: { ticket_id: ticket.id, link_path: notePath },
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
@@ -422,51 +398,40 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
         });
     };
 
-    const handleMetaChange = (field: string, value: string | string[]) => {
+    const handleMetaChange = (field: string, value: string | string[] | number[] | null) => {
         router.patch(route('kanban.meta'), {
-            path: ticket.relative_path,
-            [field]: value || null,
+            id: ticket.id,
+            [field]: value,
         }, {
             preserveState: true,
             preserveScroll: true,
         });
     };
 
-    const handleAddDependency = (notePath: string) => {
-        const newDeps = [...dependsOnPaths, notePath];
+    const handleAddDependency = (dep: TicketSearchResult) => {
+        const newDeps = [...dependsOnIds, dep.id];
         router.patch(route('kanban.meta'), {
-            path: ticket.relative_path,
+            id: ticket.id,
             depends_on: newDeps,
         }, {
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
-                // Fetch the new dep's info
-                fetch(route('kanban.show', { path: notePath }), {
-                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                })
-                    .then((r) => r.json())
-                    .then((d) => {
-                        setDependencies((prev) => [...prev, {
-                            relative_path: d.ticket.relative_path,
-                            title: d.ticket.title,
-                            vault_folder: d.ticket.vault_folder,
-                        }]);
-                    });
+                setDependencies((prev) => [...prev, { id: dep.id, title: dep.title, status: dep.status }]);
             },
         });
     };
 
-    const handleRemoveDependency = (notePath: string) => {
-        const newDeps = dependsOnPaths.filter((p) => p !== notePath);
+    const handleRemoveDependency = (depId: number) => {
+        const newDeps = dependsOnIds.filter((id) => id !== depId);
         router.patch(route('kanban.meta'), {
-            path: ticket.relative_path,
+            id: ticket.id,
             depends_on: newDeps,
         }, {
             preserveState: true,
             preserveScroll: true,
             onSuccess: () => {
-                setDependencies((prev) => prev.filter((d) => d.relative_path !== notePath));
+                setDependencies((prev) => prev.filter((d) => d.id !== depId));
             },
         });
     };
@@ -479,11 +444,10 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                 className="mx-4 max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-700 bg-gray-900 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Header */}
                 <div className="flex items-start justify-between border-b border-gray-800 p-6">
                     <div className="min-w-0 flex-1">
                         <h2 className="text-lg font-semibold text-gray-100">{ticket.title}</h2>
-                        <p className="mt-1 text-xs text-gray-500">{ticket.relative_path}</p>
+                        <p className="mt-1 text-xs text-gray-500">Ticket #{ticket.id}</p>
                     </div>
                     <button onClick={onClose} className="ml-4 text-gray-500 hover:text-gray-300">
                         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -492,9 +456,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                     </button>
                 </div>
 
-                {/* Body */}
                 <div className="space-y-6 p-6">
-                    {/* Ticket metadata badges */}
                     <div className="flex flex-wrap gap-2">
                         {ticket.priority && (
                             <span className={`rounded-md px-2 py-1 text-xs font-medium ${
@@ -521,11 +483,10 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                         )}
                     </div>
 
-                    {ticket.body_preview && (
-                        <p className="text-sm text-gray-400">{ticket.body_preview}</p>
+                    {ticket.description && (
+                        <p className="whitespace-pre-wrap text-sm text-gray-400">{ticket.description}</p>
                     )}
 
-                    {/* Agent settings */}
                     {isAgentTicket && (
                         <div className="rounded-lg border border-gray-800 bg-gray-800/30 p-4">
                             <h3 className="mb-3 text-sm font-medium text-purple-400">Agent Settings</h3>
@@ -536,7 +497,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                                         value={model}
                                         onChange={(e) => {
                                             setModel(e.target.value);
-                                            handleMetaChange('model', e.target.value);
+                                            handleMetaChange('model', e.target.value || null);
                                         }}
                                         className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none"
                                     >
@@ -551,7 +512,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                                         value={agentSkill}
                                         onChange={(e) => {
                                             setAgentSkill(e.target.value);
-                                            handleMetaChange('agent_skill', e.target.value);
+                                            handleMetaChange('agent_skill', e.target.value || null);
                                         }}
                                         className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none"
                                     >
@@ -564,7 +525,6 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                         </div>
                     )}
 
-                    {/* Dependencies */}
                     {isAgentTicket && (
                         <div>
                             <h3 className="mb-3 text-sm font-medium text-gray-300">
@@ -578,15 +538,15 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                                 <div className="mb-3 space-y-2">
                                     {dependencies.map((dep) => (
                                         <div
-                                            key={dep.relative_path}
+                                            key={dep.id}
                                             className="flex items-center justify-between rounded-lg border border-amber-900/30 bg-amber-900/10 px-3 py-2"
                                         >
                                             <div className="min-w-0 flex-1">
                                                 <p className="truncate text-sm text-gray-200">{dep.title}</p>
-                                                <p className="text-[10px] text-gray-500">{dep.relative_path}</p>
+                                                <p className="text-[10px] text-gray-500">#{dep.id} · {dep.status}</p>
                                             </div>
                                             <button
-                                                onClick={() => handleRemoveDependency(dep.relative_path)}
+                                                onClick={() => handleRemoveDependency(dep.id)}
                                                 className="ml-3 flex-shrink-0 text-gray-500 hover:text-red-400"
                                             >
                                                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -598,18 +558,14 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                                 </div>
                             )}
 
-                            <VaultLinkSearch
+                            <TicketSearch
                                 onSelect={handleAddDependency}
-                                excludePaths={[
-                                    ticket.relative_path,
-                                    ...dependencies.map((d) => d.relative_path),
-                                ]}
+                                excludeIds={[ticket.id, ...dependencies.map((d) => d.id)]}
                                 placeholder="Search tickets to add dependency..."
                             />
                         </div>
                     )}
 
-                    {/* Context Links */}
                     <div>
                         <h3 className="mb-3 text-sm font-medium text-gray-300">
                             Context Links
@@ -631,7 +587,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
                                             >
                                                 <div className="min-w-0 flex-1">
                                                     <p className="truncate text-sm text-gray-200">{link.title}</p>
-                                                    <p className="text-[10px] text-gray-500">{link.vault_folder}</p>
+                                                    <p className="text-[10px] text-gray-500">{link.vault_folder ?? link.relative_path}</p>
                                                 </div>
                                                 <button
                                                     onClick={() => handleRemoveLink(link.relative_path)}
@@ -649,22 +605,18 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
 
                                 <VaultLinkSearch
                                     onSelect={handleAddLink}
-                                    excludePaths={[
-                                        ticket.relative_path,
-                                        ...contextLinks.map((l) => l.relative_path),
-                                    ]}
+                                    excludePaths={contextLinks.map((l) => l.relative_path)}
                                 />
                             </>
                         )}
                     </div>
 
-                    {/* Delete */}
                     <div className="border-t border-gray-800 pt-4">
                         <button
                             onClick={() => {
                                 if (!confirm('Ticket wirklich löschen?')) return;
                                 router.delete(route('kanban.destroy'), {
-                                    data: { path: ticket.relative_path },
+                                    data: { id: ticket.id },
                                     onSuccess: () => onClose(),
                                 });
                             }}
@@ -679,7 +631,7 @@ function TicketDetailModal({ ticket, onClose }: { ticket: Ticket; onClose: () =>
     );
 }
 
-// --- Vault search for linking ---
+// --- Vault search for context linking ---
 
 function VaultLinkSearch({ onSelect, excludePaths, placeholder }: { onSelect: (path: string) => void; excludePaths: string[]; placeholder?: string }) {
     const [query, setQuery] = useState('');
@@ -720,7 +672,6 @@ function VaultLinkSearch({ onSelect, excludePaths, placeholder }: { onSelect: (p
         setShowResults(false);
     };
 
-    // Close on click outside
     useEffect(() => {
         const handler = (e: MouseEvent) => {
             if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
@@ -755,16 +706,10 @@ function VaultLinkSearch({ onSelect, excludePaths, placeholder }: { onSelect: (p
                             onClick={() => handleSelect(result)}
                             className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-gray-700"
                         >
-                            <svg className="h-4 w-4 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                            </svg>
                             <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm text-gray-200">{result.title}</p>
-                                <p className="truncate text-[10px] text-gray-500">{result.vault_folder}/{result.title}</p>
+                                <p className="truncate text-[10px] text-gray-500">{result.vault_folder}</p>
                             </div>
-                            <svg className="h-4 w-4 flex-shrink-0 text-indigo-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                            </svg>
                         </button>
                     ))}
                 </div>
@@ -773,6 +718,83 @@ function VaultLinkSearch({ onSelect, excludePaths, placeholder }: { onSelect: (p
             {showResults && query.length >= 2 && results.length === 0 && (
                 <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 p-3 text-center shadow-xl">
                     <p className="text-xs text-gray-500">No matching notes found</p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// --- Ticket search for dependencies ---
+
+function TicketSearch({ onSelect, excludeIds, placeholder }: { onSelect: (t: TicketSearchResult) => void; excludeIds: number[]; placeholder?: string }) {
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState<TicketSearchResult[]>([]);
+    const [showResults, setShowResults] = useState(false);
+    const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+    const wrapperRef = useRef<HTMLDivElement>(null);
+
+    const search = useCallback((q: string) => {
+        if (q.length < 2) { setResults([]); return; }
+        fetch(route('kanban.search') + '?q=' + encodeURIComponent(q), {
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then((r) => r.json())
+            .then((data: TicketSearchResult[]) => {
+                setResults(data.filter((t) => !excludeIds.includes(t.id)).slice(0, 10));
+            });
+    }, [excludeIds]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setQuery(val);
+        clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => search(val), 250);
+    };
+
+    const handleSelect = (result: TicketSearchResult) => {
+        onSelect(result);
+        setQuery('');
+        setResults([]);
+        setShowResults(false);
+    };
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+                setShowResults(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    return (
+        <div ref={wrapperRef} className="relative">
+            <input
+                type="text"
+                value={query}
+                onChange={handleChange}
+                onFocus={() => setShowResults(true)}
+                placeholder={placeholder ?? "Search tickets..."}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+            />
+            {showResults && results.length > 0 && (
+                <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-gray-700 bg-gray-800 shadow-xl">
+                    {results.map((result) => (
+                        <button
+                            key={result.id}
+                            onClick={() => handleSelect(result)}
+                            className="flex w-full flex-col px-3 py-2 text-left transition-colors hover:bg-gray-700"
+                        >
+                            <span className="truncate text-sm text-gray-200">{result.title}</span>
+                            <span className="text-[10px] text-gray-500">#{result.id} · {result.status}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+            {showResults && query.length >= 2 && results.length === 0 && (
+                <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-700 bg-gray-800 p-3 text-center shadow-xl">
+                    <p className="text-xs text-gray-500">No matching tickets</p>
                 </div>
             )}
         </div>
@@ -789,7 +811,6 @@ function NewTicketForm({ onClose }: { onClose: () => void }) {
         status: 'backlog',
         assigned_to: 'human',
         description: '',
-        folder: 'inbox',
     });
 
     const handleSubmit = (e: React.FormEvent) => {
