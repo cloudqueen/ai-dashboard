@@ -177,29 +177,62 @@ New `KanbanController` endpoints:
 **Dependency**: `dragonmantank/cron-expression` (via composer)
 
 ### Phase 1J: Skills UI + MCP Server + Misc
-**Skills**:
-- Vault folder `skills/` for skill markdown files (frontmatter: name, display_name, description, system_prompt, prompt_template, required_context, enabled)
+**Skills** (originally vault-based, moved in Phase 3 — see below):
 - `SkillController` + `Skills/Index.tsx` (277 LOC) — browser/editor
 
-**MCP Server** (`app/Console/Commands/McpServer.php`, 482 LOC):
+**MCP Server** (`app/Console/Commands/McpServer.php`, ~440 LOC):
 - `mcp:serve` command — STDIO MCP transport for Claude Desktop integration
-- Tools exposed: vault read/write/search, kanban create/move, daily checkin context
+- Tools exposed: vault read/search, kanban create/list, daily checkin update, biography (Stefanie.md)
 
 **DashboardServe** (`app/Console/Commands/DashboardServe.php`):
 - Convenience command to start Laravel server + queue workers + vite dev
 
+### Phase 1K: Settings UI v1
+**SettingsService** (`app/Services/SettingsService.php`) — typed wrappers around the `settings` key/value table with config-fallbacks.
+
+**Settings page** (`/settings`): Vault status (path, sync time, notes count, "Sync now" button), Agent (CLI path, limits, monthly cost bar vs budget, **Pause toggle** — `AgentOrchestrator::dispatchReadyTickets()` skips when paused), Psychology (enabled toggle DB-overrides env, WIP soft/hard limits as inputs), Queue (pending/failed counts + "Retry failed").
+
+**Endpoints**: `PATCH /api/settings/{key}` (whitelist: `agent.paused`, `psychology.enabled`, `psychology.wip_soft_limit`, `psychology.wip_hard_limit`), `POST /api/settings/sync-now`, `POST /api/settings/retry-failed`. VaultSync now records `vault.last_sync_at|status|error` via SettingsService.
+
+### Phase 2: Tickets-in-DB refactor (architectural)
+**Decision**: Tickets are first-class DB rows. The vault is a pure knowledge store; vault notes are referenced by tickets via `context_links` (paths) but are never themselves tickets.
+
+**Storage migration**: dashboard outputs no longer pollute the vault. Two new locations under `storage/app/private/`:
+- `dashboard/agent-outputs/` — written by `OutputProcessor` after each successful agent run
+- `dashboard/skills/` — `SKILL.md` folders for file-based skills (DB-backed AgentSkills are still supported)
+
+**Schema**: new `tickets` table (title, description, type, status, priority, assigned_to, agent_skill, tags json, due_date, postpone_count, emotional_charge, system_level, context_links json, depends_on json — array of ticket IDs, model, routine_id FK, source_vault_note_id FK, completed_at). All ticket-touching tables gained `ticket_id` FKs (agent_runs, routine_runs, task_events, psych_interventions). Phase 1 backfill: 8 tickets created from historical run paths.
+
+**TicketService** (`app/Services/TicketService.php`) — sole writer for tickets. create/update/move/delete + `promoteFromVaultNote(VaultNote $note)` (creates Ticket with the source note as a context link, source note untouched) + context-link helpers. `move()` detects backwards transitions and increments `postpone_count`; emits TaskEvent + ActivityLog + DashboardEvent + triggers PsychEngine.
+
+**KanbanService** is now read-only (board + filter options + context-link resolution). All write paths go through `TicketService`. Frontend identifies tickets by integer ID, no more vault paths.
+
+**PromptBuilder.gatherContext** resolves `context_links` paths to vault note bodies, and `depends_on` (ticket IDs) to last completed agent runs' summaries.
+
+**OutputProcessor** writes agent output as a markdown file in `storage/app/private/dashboard/agent-outputs/{date}-{run_id}-{slug}.md`, records the path on `agent_runs.output_note_path`, and moves the source ticket to `review` via TicketService.
+
+### Phase 3: Cleanup (drop legacy)
+**Schema drops** (migration `drop_legacy_ticket_columns`):
+- `vault_notes`: status, priority, type, assigned_to, tags, due_date (and their indexes) — all derived from frontmatter, all unused now
+- `agent_runs`: ticket_path, vault_note_id (replaced by ticket_id FK)
+- `routine_runs`, `task_events`, `psych_interventions`: ticket_path
+- `daily_checkins`: vault_note_path
+
+**Code**: VaultManager indexer no longer extracts ticket-only frontmatter; VaultNote model has no ticket scopes; AgentRun.vaultNote() relation removed; DailyCheckinService.saveDailyNote dead method removed; McpServer.toolSaveCheckin no longer writes a vault note. SkillLoader rewritten to use a filesystem path (no VaultManager dependency); skill source label changed `vault` → `file`. Dashboard's vault-folder config (`dashboard.vault.folders.*`) removed entirely; replaced by `dashboard.storage.{agent_outputs,skills}`.
+
 ## Additional Database Tables
-- `task_events`: ticket_path, event_type (created|status_changed|postponed|completed|abandoned), from_status, to_status, metadata (json)
+- `tickets`: see Phase 2 above (the canonical kanban data)
+- `task_events`: ticket_id FK, event_type (created|status_changed|postponed|completed|abandoned), from_status, to_status, metadata (json)
 - `settings`: key (unique), value, type (string|integer|boolean|json), group
-- `psych_interventions`: framework, intervention_type, content (json), was_helpful, dismissed_at
-- `daily_checkins`: see Phase 1H above
+- `psych_interventions`: framework, intervention_type, ticket_id, content, was_helpful, dismissed
+- `daily_checkins`: see Phase 1H above (vault_note_path column dropped in Phase 3)
 - `cost_events`: see Phase 1F above
 - `dashboard_events`: id, type, payload (json), occurred_at — SSE event queue
 - `activity_log`: actor, action, subject_type, subject_id, details (json)
 - `routines`, `routine_runs`: see Phase 1I above
 
 ## Models
-- `VaultNote`, `TaskEvent`, `Setting`, `AgentRun`, `AgentSkill`, `User`
+- `Ticket` (canonical kanban model), `VaultNote` (slim — pure note index), `TaskEvent`, `Setting`, `AgentRun`, `AgentSkill`, `User`
 - `ActivityLog`, `CostEvent`, `DailyCheckin`, `PsychIntervention`, `Routine`, `RoutineRun`
 
 ## Enums
@@ -210,11 +243,8 @@ Run `php artisan route:list` for the current set. Top-level pages: `/dashboard`,
 
 ## What's NOT Built Yet
 
-### Settings UI (next up)
-`/settings` is still a placeholder Inertia page. Needs UI for: vault path, agent budget, psychology toggle, daily model, skill folder, queue worker status.
-
 ### Tests
-Only Breeze auth scaffolding tests exist. Needs at minimum: KanbanService::moveTicket, VaultManager atomic write, RoutineScheduler::dispatch, PsychEngine triggers.
+Only Breeze auth scaffolding tests exist. Needs at minimum: TicketService (create/move/postpone/delete), AgentOrchestrator::dispatchReadyTickets (with paused / WIP / dependencies), VaultManager atomic write, RoutineScheduler::dispatch, PsychEngine triggers.
 
 ### Phase 2: Email Integration
 - `webklex/php-imap` for IMAP
@@ -247,19 +277,17 @@ Full detailed plan at: `/root/.claude/plans/sleepy-whistling-swing.md`
 
 ## Git Log (most recent)
 ```
+f5f0f07 Phase 3: drop legacy columns and dashboard-folder vault writes
+c66145d Phase 2b: switch frontend to ticket IDs
+4945be1 Phase 2a: switch backend services to Ticket model
+493bdff Phase 1: introduce tickets table, model, service (additive)
+2bff62c Build settings page v1: vault, agent, psychology, queue
+aba1bf7 Update memory.md with phases 1E–1J
 997bc86 Add skills UI, dashboard widgets, vault folder counts, MCP and serve commands
 71c526a Add routines: cron-driven recurring agent runs
 bdc6544 Add daily check-in chat and psychology engine
 ea078dd Add ticket detail, linking, meta editing, and deletion to kanban
 88831e5 Add skill loader, cost tracking, and prompt-builder context
 67c5ea4 Add activity log, dashboard event bus, and SSE event stream
-8089419 Merge branch 'claude/plan-ai-dashboard-yyImB'
-c4bbdf1 Seeder
-ab15665 Add memory.md — full session context for local continuation
-4ca2d5d Add database factories and seeders from Laravel scaffold
-7dd2bda Phase 1D: Dashboard with live widget data
-71f0349 Phase 1C: Agent loop — autonomous AI execution
-a9fcfc5 Phase 1B: Kanban board with drag-and-drop
-d31cb14 Phase 1A: Vault integration — memory system
-7347f72 Phase 0: Laravel 13 + React + Inertia + Breeze scaffold
+... (Phase 0–1D earlier)
 ```
