@@ -9,10 +9,10 @@ use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PsychController;
 use App\Http\Controllers\RoutineController;
+use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SkillController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/', function () {
     if (auth()->check()) {
@@ -75,9 +75,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/api/skills', [SkillController::class, 'list'])->name('skills.list');
     Route::get('/api/skills/{name}', [SkillController::class, 'show'])->name('skills.show');
 
-    Route::get('/settings', function () {
-        return Inertia::render('Settings/Index');
-    })->name('settings');
+    Route::get('/settings', [SettingsController::class, 'index'])->name('settings');
+    Route::patch('/api/settings/{key}', [SettingsController::class, 'update'])->where('key', '[a-z._]+')->name('settings.update');
+    Route::post('/api/settings/sync-now', [SettingsController::class, 'syncNow'])->name('settings.sync_now');
+    Route::post('/api/settings/retry-failed', [SettingsController::class, 'retryFailedJobs'])->name('settings.retry_failed');
 });
 
 Route::middleware('auth')->group(function () {

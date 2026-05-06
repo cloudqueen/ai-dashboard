@@ -13,7 +13,7 @@ class PsychEngine
      */
     public function evaluate(string $trigger, ?string $ticketPath = null): ?PsychIntervention
     {
-        if (! config('dashboard.psychology.enabled', false)) {
+        if (! app(\App\Services\SettingsService::class)->psychologyEnabled()) {
             return null;
         }
 
@@ -72,8 +72,9 @@ class PsychEngine
             ->whereIn('status', ['in_progress', 'ready_for_agent'])
             ->count();
 
-        $wipSoft = config('dashboard.psychology.wip_soft_limit', 3);
-        $wipHard = config('dashboard.psychology.wip_hard_limit', 5);
+        $settings = app(\App\Services\SettingsService::class);
+        $wipSoft = $settings->wipSoftLimit();
+        $wipHard = $settings->wipHardLimit();
 
         // Streak: consecutive days with at least one completion
         $streak = $this->calculateStreak();
@@ -221,7 +222,7 @@ class PsychEngine
             ->whereIn('status', ['in_progress', 'ready_for_agent'])
             ->count();
 
-        $wipHard = config('dashboard.psychology.wip_hard_limit', 5);
+        $wipHard = app(\App\Services\SettingsService::class)->wipHardLimit();
 
         if ($wipCount >= $wipHard) {
             return $this->createChimpIntervention(

@@ -63,6 +63,10 @@ class AgentOrchestrator
      */
     public function dispatchReadyTickets(): void
     {
+        if (app(\App\Services\SettingsService::class)->agentPaused()) {
+            return;
+        }
+
         if (! $this->canAcceptNewRun() || ! $this->withinBudget()) {
             return;
         }

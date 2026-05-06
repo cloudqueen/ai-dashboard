@@ -83,12 +83,12 @@ class DashboardController extends Controller
         ];
 
         // Psychology insights
-        $psychInsights = config('dashboard.psychology.enabled', false)
+        $psychInsights = app(\App\Services\SettingsService::class)->psychologyEnabled()
             ? $psych->getDashboardInsights()
             : null;
 
         // Trigger dashboard_load intervention
-        if (config('dashboard.psychology.enabled', false)) {
+        if (app(\App\Services\SettingsService::class)->psychologyEnabled()) {
             $psych->evaluate('dashboard_load');
         }
 

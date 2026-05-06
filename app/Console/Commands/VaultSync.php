@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\SettingsService;
 use App\Services\Vault\GitSync;
 use App\Services\Vault\VaultManager;
 use Illuminate\Console\Command;
@@ -12,7 +13,7 @@ class VaultSync extends Command
 
     protected $description = 'Sync the Obsidian vault with its remote git repository';
 
-    public function handle(GitSync $gitSync, VaultManager $vault): int
+    public function handle(GitSync $gitSync, VaultManager $vault, SettingsService $settings): int
     {
         if (! config('dashboard.vault.sync_enabled')) {
             $this->info('Vault sync is disabled.');
@@ -28,6 +29,7 @@ class VaultSync extends Command
         $result = $gitSync->pull();
 
         if (! $result->success) {
+            $settings->recordVaultSync(false, $result->error);
             $this->error('Sync failed: ' . $result->error);
             return self::FAILURE;
         }
@@ -41,6 +43,7 @@ class VaultSync extends Command
             }
         }
 
+        $settings->recordVaultSync(true);
         $this->info('Vault sync complete.');
 
         return self::SUCCESS;
