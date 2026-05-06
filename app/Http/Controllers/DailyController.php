@@ -14,7 +14,6 @@ class DailyController extends Controller
     public function index(DailyCheckinService $service, SettingsService $settings)
     {
         $checkin = $service->getOrCreateToday();
-        $projectId = $settings->dailyCoachProjectId();
 
         $history = DailyCheckin::query()
             ->whereNotNull('completed_at')
@@ -27,8 +26,8 @@ class DailyController extends Controller
             'checkin' => $checkin,
             'history' => $history,
             'dailyCoach' => [
-                'project_id' => $projectId,
-                'deep_link' => $projectId ? 'claude://claude.ai/project/' . $projectId : null,
+                'project_id' => $settings->dailyCoachProjectId(),
+                'deep_link' => $settings->dailyCoachDeepLink(),
             ],
         ]);
     }

@@ -36,6 +36,7 @@ type Queue = { pending: number; failed: number };
 
 type DailyCoach = {
     project_id: string | null;
+    greeting: string;
     deep_link: string | null;
     mcp_command: string;
 };
@@ -88,12 +89,15 @@ export default function SettingsIndex({ vault, agent, psychology, queue, profile
 
 function DailyCoachSection({ coach, embeddings }: { coach: DailyCoach; embeddings: Embeddings }) {
     const [projectId, setProjectId] = useState(coach.project_id ?? '');
+    const [greeting, setGreeting] = useState(coach.greeting);
     const [saving, setSaving] = useState(false);
     const [copied, setCopied] = useState(false);
 
+    const dirty = projectId !== (coach.project_id ?? '') || greeting !== coach.greeting;
+
     const save = () => {
         setSaving(true);
-        router.patch(route('settings.daily_coach'), { project_id: projectId || null }, {
+        router.patch(route('settings.daily_coach'), { project_id: projectId || null, greeting }, {
             preserveScroll: true,
             preserveState: true,
             onFinish: () => setSaving(false),
@@ -119,22 +123,38 @@ function DailyCoachSection({ coach, embeddings }: { coach: DailyCoach; embedding
                 <p className="mt-0.5 text-xs text-gray-500">
                     URL aus Claude Desktop kopieren: <code className="text-gray-400">claude.ai/project/<strong>diese-id</strong></code>
                 </p>
-                <div className="mt-2 flex gap-2">
-                    <input
-                        type="text"
-                        value={projectId}
-                        onChange={(e) => setProjectId(e.target.value)}
-                        placeholder="z.B. abc123-def-456"
-                        className="flex-1 rounded-md border-gray-700 bg-gray-950 text-sm text-gray-200 focus:border-indigo-500 focus:ring-indigo-500"
-                    />
-                    <button
-                        onClick={save}
-                        disabled={saving}
-                        className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                    >
-                        {saving ? '…' : 'Speichern'}
-                    </button>
-                </div>
+                <input
+                    type="text"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    placeholder="z.B. abc123-def-456"
+                    className="mt-2 w-full rounded-md border-gray-700 bg-gray-950 text-sm text-gray-200 focus:border-indigo-500 focus:ring-indigo-500"
+                />
+            </div>
+
+            <div className="mt-4">
+                <label className="block text-xs font-medium text-gray-400">Begrüßung (wird im Eingabefeld vorausgefüllt — du drückst nur Enter)</label>
+                <textarea
+                    value={greeting}
+                    onChange={(e) => setGreeting(e.target.value)}
+                    rows={3}
+                    placeholder="Hi! Lass uns mit dem Daily Check-in starten…"
+                    className="mt-2 w-full rounded-md border-gray-700 bg-gray-950 text-sm text-gray-200 focus:border-indigo-500 focus:ring-indigo-500"
+                />
+                <p className="mt-1 text-[10px] text-gray-500">
+                    Max ~14000 Zeichen. URL-encoded an Claude Desktop übergeben — Auto-Senden geht nicht, ein Tastendruck (Enter) bleibt.
+                </p>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+                <button
+                    onClick={save}
+                    disabled={saving || !dirty}
+                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                    {saving ? '…' : 'Speichern'}
+                </button>
+                {dirty && <span className="text-xs text-yellow-400">Ungespeichert</span>}
             </div>
 
             {coach.deep_link && (

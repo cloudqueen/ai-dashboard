@@ -62,9 +62,8 @@ class SettingsController extends Controller
             'profile' => $settings->getProfile(),
             'dailyCoach' => [
                 'project_id' => $settings->dailyCoachProjectId(),
-                'deep_link' => $settings->dailyCoachProjectId()
-                    ? 'claude://claude.ai/project/' . $settings->dailyCoachProjectId()
-                    : null,
+                'greeting' => $settings->dailyCoachGreeting(),
+                'deep_link' => $settings->dailyCoachDeepLink(),
                 'mcp_command' => 'php ' . base_path('artisan') . ' mcp:serve',
             ],
             'memories' => CoachMemory::query()
@@ -131,10 +130,19 @@ class SettingsController extends Controller
 
     public function updateDailyCoachProjectId(Request $request, SettingsService $settings)
     {
-        $data = $request->validate(['project_id' => 'nullable|string|max:200']);
-        $settings->setDailyCoachProjectId($data['project_id'] ?? null);
+        $data = $request->validate([
+            'project_id' => 'nullable|string|max:200',
+            'greeting' => 'nullable|string|max:5000',
+        ]);
 
-        return back()->with('success', 'Project-ID gespeichert.');
+        if (array_key_exists('project_id', $data)) {
+            $settings->setDailyCoachProjectId($data['project_id'] ?? null);
+        }
+        if (array_key_exists('greeting', $data)) {
+            $settings->setDailyCoachGreeting($data['greeting'] ?? '');
+        }
+
+        return back()->with('success', 'Daily-Coach-Einstellungen gespeichert.');
     }
 
     public function searchMemories(Request $request, CoachMemoryService $memories)

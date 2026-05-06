@@ -103,4 +103,32 @@ class SettingsService
     {
         Setting::set('daily_coach.project_id', $id ?? '', 'string', 'daily_coach');
     }
+
+    public function dailyCoachGreeting(): string
+    {
+        return (string) Setting::get(
+            'daily_coach.greeting',
+            'Hi! Lass uns mit dem Daily Check-in starten. Hol dir bitte erst mein Profil, die letzten Trends und relevante Memories.'
+        );
+    }
+
+    public function setDailyCoachGreeting(string $greeting): void
+    {
+        Setting::set('daily_coach.greeting', $greeting, 'string', 'daily_coach');
+    }
+
+    public function dailyCoachDeepLink(): ?string
+    {
+        $id = $this->dailyCoachProjectId();
+        if (! $id) {
+            return null;
+        }
+
+        $base = 'claude://claude.ai/project/' . $id;
+        $greeting = trim($this->dailyCoachGreeting());
+
+        return $greeting === ''
+            ? $base
+            : $base . '?q=' . rawurlencode($greeting);
+    }
 }
