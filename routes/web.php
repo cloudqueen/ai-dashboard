@@ -8,6 +8,7 @@ use App\Http\Controllers\EventStreamController;
 use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PsychController;
+use App\Http\Controllers\RoutineController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -60,6 +61,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/api/psych/dismiss', [PsychController::class, 'dismiss'])->name('psych.dismiss');
 
     Route::get('/api/events/stream', [EventStreamController::class, 'stream'])->name('events.stream');
+
+    Route::get('/routines', [RoutineController::class, 'index'])->name('routines');
+    Route::post('/routines', [RoutineController::class, 'store'])->name('routines.store');
+    Route::patch('/routines/{routine}', [RoutineController::class, 'update'])->name('routines.update');
+    Route::delete('/routines/{routine}', [RoutineController::class, 'destroy'])->name('routines.destroy');
+    Route::post('/routines/{routine}/trigger', [RoutineController::class, 'trigger'])->name('routines.trigger');
+    Route::get('/api/routines/{routine}/runs', [RoutineController::class, 'runs'])->name('routines.runs');
 
     Route::get('/settings', function () {
         return Inertia::render('Settings/Index');

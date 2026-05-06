@@ -10,3 +10,6 @@ Schedule::command('vault:index --changed-only')->everyThirtyMinutes();
 
 // Agent heartbeat - check for ready tickets and process completions
 Schedule::command('agent:heartbeat')->everyThreeMinutes();
+
+// Routine check - dispatch due recurring tasks
+Schedule::command('routine:check')->everyMinute();
