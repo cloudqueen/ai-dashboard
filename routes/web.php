@@ -9,6 +9,7 @@ use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PsychController;
 use App\Http\Controllers\RoutineController;
+use App\Http\Controllers\SkillController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -68,6 +69,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/routines/{routine}', [RoutineController::class, 'destroy'])->name('routines.destroy');
     Route::post('/routines/{routine}/trigger', [RoutineController::class, 'trigger'])->name('routines.trigger');
     Route::get('/api/routines/{routine}/runs', [RoutineController::class, 'runs'])->name('routines.runs');
+
+    Route::get('/skills', [SkillController::class, 'index'])->name('skills');
+    Route::post('/skills', [SkillController::class, 'store'])->name('skills.store');
+    Route::get('/api/skills', [SkillController::class, 'list'])->name('skills.list');
+    Route::get('/api/skills/{name}', [SkillController::class, 'show'])->name('skills.show');
 
     Route::get('/settings', function () {
         return Inertia::render('Settings/Index');

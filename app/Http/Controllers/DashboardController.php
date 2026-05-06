@@ -4,12 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\AgentRun;
 use App\Models\VaultNote;
+use App\Services\Psychology\PsychEngine;
 use App\Services\Vault\VaultManager;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
 {
-    public function index(VaultManager $vault)
+    public function index(VaultManager $vault, PsychEngine $psych)
     {
         $vaultConfigured = $vault->isConfigured();
 
@@ -46,11 +47,50 @@ class DashboardController extends Controller
                 ->toArray(),
         ];
 
-        // Recent activity (task events)
-        $recentActivity = \App\Models\TaskEvent::orderBy('created_at', 'desc')
-            ->limit(10)
+        // Recent activity — prefer new activity_log, fallback to task_events
+        $recentActivity = \App\Models\ActivityLog::orderBy('created_at', 'desc')
+            ->limit(15)
             ->get()
             ->toArray();
+
+        if (empty($recentActivity)) {
+            $recentActivity = \App\Models\TaskEvent::orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get()
+                ->map(fn ($e) => [
+                    'actor_type' => 'system',
+                    'action' => $e->event_type,
+                    'entity_type' => 'ticket',
+                    'entity_id' => $e->ticket_path,
+                    'details' => ['from' => $e->from_status, 'to' => $e->to_status],
+                    'created_at' => $e->created_at,
+                ])
+                ->toArray();
+        }
+
+        // Recent routine results
+        $routineResults = \App\Models\RoutineRun::with('routine:id,name')
+            ->where('status', 'completed')
+            ->orderBy('completed_at', 'desc')
+            ->limit(5)
+            ->get(['id', 'routine_id', 'summary', 'output_note_path', 'completed_at'])
+            ->toArray();
+
+        // Usage stats
+        $usageStats = [
+            'today' => \App\Models\CostEvent::todayStats(),
+            'month' => \App\Models\CostEvent::monthStats(),
+        ];
+
+        // Psychology insights
+        $psychInsights = config('dashboard.psychology.enabled', false)
+            ? $psych->getDashboardInsights()
+            : null;
+
+        // Trigger dashboard_load intervention
+        if (config('dashboard.psychology.enabled', false)) {
+            $psych->evaluate('dashboard_load');
+        }
 
         return Inertia::render('Dashboard', [
             'vaultConfigured' => $vaultConfigured,
@@ -58,6 +98,9 @@ class DashboardController extends Controller
             'dueSoon' => $dueSoon,
             'agentStatus' => $agentStatus,
             'recentActivity' => $recentActivity,
+            'psychInsights' => $psychInsights,
+            'routineResults' => $routineResults,
+            'usageStats' => $usageStats,
         ]);
     }
 }

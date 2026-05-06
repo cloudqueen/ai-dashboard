@@ -26,16 +26,21 @@ class VaultController extends Controller
 
         $notes = $query->paginate(50)->withQueryString();
 
-        // Get unique folders for the sidebar
+        // Get folders with note counts for the sidebar tree
         $folders = VaultNote::select('vault_folder')
             ->distinct()
             ->orderBy('vault_folder')
             ->pluck('vault_folder')
             ->values();
 
+        $folderCounts = VaultNote::selectRaw('vault_folder, count(*) as count')
+            ->groupBy('vault_folder')
+            ->pluck('count', 'vault_folder');
+
         return Inertia::render('Vault/Index', [
             'notes' => $notes,
             'folders' => $folders,
+            'folderCounts' => $folderCounts,
             'filters' => [
                 'search' => $search,
                 'folder' => $folder,

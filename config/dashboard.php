@@ -21,6 +21,7 @@ return [
             'psychology' => 'psychology',
             'templates' => 'templates',
             'daily' => 'daily',
+            'skills' => 'skills',
         ],
     ],
 
