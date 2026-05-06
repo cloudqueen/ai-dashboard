@@ -1,10 +1,13 @@
 <?php
 
 use App\Http\Controllers\AgentController;
+use App\Http\Controllers\DailyController;
+use App\Http\Controllers\DailyStreamController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventStreamController;
 use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PsychController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -41,6 +44,20 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/agents/{agentRun}', [AgentController::class, 'show'])->name('agents.show');
     Route::post('/api/agents/run', [AgentController::class, 'triggerRun'])->name('agents.run');
     Route::get('/api/agents/status', [AgentController::class, 'status'])->name('agents.status');
+
+    Route::get('/daily', [DailyController::class, 'index'])->name('daily');
+    Route::get('/api/daily/current', [DailyController::class, 'current'])->name('daily.current');
+    Route::post('/api/daily/message', [DailyController::class, 'message'])->name('daily.message');
+    Route::post('/api/daily/stream', [DailyStreamController::class, 'stream'])->name('daily.stream');
+    Route::post('/api/daily/mood', [DailyController::class, 'setMood'])->name('daily.mood');
+    Route::post('/api/daily/ticket', [DailyController::class, 'createTicket'])->name('daily.ticket');
+    Route::post('/api/daily/finish', [DailyController::class, 'finish'])->name('daily.finish');
+    Route::get('/api/daily/history', [DailyController::class, 'history'])->name('daily.history');
+
+    Route::get('/api/psych/insights', [PsychController::class, 'insights'])->name('psych.insights');
+    Route::get('/api/psych/interventions', [PsychController::class, 'activeInterventions'])->name('psych.interventions');
+    Route::post('/api/psych/feedback', [PsychController::class, 'feedback'])->name('psych.feedback');
+    Route::post('/api/psych/dismiss', [PsychController::class, 'dismiss'])->name('psych.dismiss');
 
     Route::get('/api/events/stream', [EventStreamController::class, 'stream'])->name('events.stream');
 
