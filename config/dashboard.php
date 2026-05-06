@@ -26,6 +26,24 @@ return [
     'storage' => [
         'agent_outputs' => 'dashboard/agent-outputs',
         'skills' => 'dashboard/skills',
+        'profile' => 'dashboard/profile.md',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Embeddings (Voyage AI)
+    |--------------------------------------------------------------------------
+    */
+
+    'embeddings' => [
+        'voyage_api_key' => env('VOYAGE_API_KEY'),
+        'voyage_model' => env('VOYAGE_EMBEDDING_MODEL', 'voyage-3-lite'),
+        'dims' => (int) env('VOYAGE_EMBEDDING_DIMS', 512),
+    ],
+
+    'ai_log' => [
+        'enabled' => env('AI_LOG_ENABLED', false),
+        'days' => (int) env('AI_LOG_DAYS', 7),
     ],
 
     /*

@@ -11,6 +11,7 @@
         "laravel/framework": "^13.0",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
+        "pgvector/pgvector": "^0.2.2",
         "symfony/yaml": "^8.0",
         "tightenco/ziggy": "^2.0"
     },
