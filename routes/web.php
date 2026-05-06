@@ -24,6 +24,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/api/kanban/move', [KanbanController::class, 'move'])->name('kanban.move');
     Route::post('/api/kanban/tickets', [KanbanController::class, 'store'])->name('kanban.store');
     Route::post('/api/kanban/promote', [KanbanController::class, 'promote'])->name('kanban.promote');
+    Route::get('/api/kanban/ticket/{path}', [KanbanController::class, 'show'])->name('kanban.show')->where('path', '.*');
+    Route::post('/api/kanban/link', [KanbanController::class, 'addLink'])->name('kanban.link');
+    Route::delete('/api/kanban/link', [KanbanController::class, 'removeLink'])->name('kanban.unlink');
+    Route::patch('/api/kanban/meta', [KanbanController::class, 'updateMeta'])->name('kanban.meta');
+    Route::delete('/api/kanban/ticket', [KanbanController::class, 'destroy'])->name('kanban.destroy');
 
     Route::get('/vault', [VaultController::class, 'index'])->name('vault');
     Route::get('/vault/note/{path}', [VaultController::class, 'show'])->name('vault.show')->where('path', '.*');

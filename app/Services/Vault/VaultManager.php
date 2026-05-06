@@ -144,7 +144,9 @@ class VaultManager
         return VaultNote::updateOrCreate(
             ['relative_path' => $relativePath],
             [
-                'title' => $parsed->title(),
+                'title' => $parsed->title() !== 'Untitled'
+                    ? $parsed->title()
+                    : pathinfo($relativePath, PATHINFO_FILENAME),
                 'vault_folder' => dirname($relativePath),
                 'frontmatter' => $fm,
                 'body_preview' => Str::limit($parsed->body, 500),
