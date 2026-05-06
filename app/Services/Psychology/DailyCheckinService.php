@@ -3,7 +3,8 @@
 namespace App\Services\Psychology;
 
 use App\Models\DailyCheckin;
-use App\Models\VaultNote;
+use App\Models\Ticket;
+use App\Services\SettingsService;
 use App\Services\Vault\VaultManager;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -130,15 +131,12 @@ class DailyCheckinService
             'completed_at' => now(),
         ]);
 
-        $notePath = $this->saveDailyNote($checkin);
-        $checkin->update(['vault_note_path' => $notePath]);
-
         app(\App\Services\ActivityLogger::class)->log(
             'human', 'checkin_finished', 'checkin', $checkin->date->format('Y-m-d'),
             details: ['mood' => $checkin->mood, 'energy' => $checkin->energy]
         );
 
-        return $notePath;
+        return null;
     }
 
     // --- Claude CLI with session persistence ---
@@ -348,17 +346,17 @@ PROMPT;
         $lines = [];
 
         // Due today / overdue
-        $dueTodayOrOverdue = VaultNote::tickets()
+        $dueTodayOrOverdue = Ticket::query()
             ->whereNotNull('due_date')
             ->where('due_date', '<=', now()->endOfDay())
             ->where('status', '!=', 'done')
             ->orderBy('due_date')
-            ->get(['title', 'due_date', 'priority', 'status', 'frontmatter']);
+            ->get();
 
         if ($dueTodayOrOverdue->isNotEmpty()) {
             $lines[] = "FÄLLIG HEUTE / ÜBERFÄLLIG:";
             foreach ($dueTodayOrOverdue as $t) {
-                $dueStr = $t->due_date->format('d.m. H:i');
+                $dueStr = $t->due_date->format('d.m.');
                 $overdue = $t->due_date->isPast() ? ' ⚠️ ÜBERFÄLLIG' : '';
                 $lines[] = "- {$t->title} (fällig: {$dueStr}, {$t->priority}){$overdue}";
             }
@@ -366,13 +364,13 @@ PROMPT;
         }
 
         // Due this week
-        $dueThisWeek = VaultNote::tickets()
+        $dueThisWeek = Ticket::query()
             ->whereNotNull('due_date')
             ->where('due_date', '>', now()->endOfDay())
             ->where('due_date', '<=', now()->endOfWeek())
             ->where('status', '!=', 'done')
             ->orderBy('due_date')
-            ->get(['title', 'due_date', 'priority']);
+            ->get();
 
         if ($dueThisWeek->isNotEmpty()) {
             $lines[] = "Fällig diese Woche:";
@@ -384,28 +382,26 @@ PROMPT;
         }
 
         // Open tickets
-        $openTickets = VaultNote::tickets()
+        $openTickets = Ticket::query()
             ->whereIn('status', ['todo', 'in_progress', 'ready_for_agent'])
             ->orderByRaw("CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END")
             ->limit(10)
-            ->get(['title', 'status', 'priority', 'frontmatter']);
+            ->get();
 
         if ($openTickets->isNotEmpty()) {
             $lines[] = "Offene Aufgaben:";
             foreach ($openTickets as $t) {
-                $charge = $t->frontmatter['emotional_charge'] ?? 'low';
-                $postponed = $t->frontmatter['postpone_count'] ?? 0;
                 $extra = [];
-                if ($charge === 'high') $extra[] = "hohe emotionale Ladung";
-                if ($postponed >= 2) $extra[] = "{$postponed}x verschoben";
+                if ($t->emotional_charge === 'high') $extra[] = "hohe emotionale Ladung";
+                if ($t->postpone_count >= 2) $extra[] = "{$t->postpone_count}x verschoben";
                 $suffix = $extra ? ' (' . implode(', ', $extra) . ')' : '';
                 $lines[] = "- [{$t->status}] {$t->title} ({$t->priority}){$suffix}";
             }
         }
 
-        $wip = VaultNote::tickets()->whereIn('status', ['in_progress', 'ready_for_agent'])->count();
+        $wip = Ticket::query()->whereIn('status', ['in_progress', 'ready_for_agent'])->count();
         if ($wip > 0) {
-            $wipLimit = config('dashboard.psychology.wip_soft_limit', 3);
+            $wipLimit = app(SettingsService::class)->wipSoftLimit();
             $lines[] = "\nWIP: {$wip}/{$wipLimit}";
         }
 
@@ -454,7 +450,7 @@ PROMPT;
         }
     }
 
-    // --- Vault note ---
+    // --- Legacy: vault note export (no longer called; daily summary lives in DB) ---
 
     private function saveDailyNote(DailyCheckin $checkin): string
     {

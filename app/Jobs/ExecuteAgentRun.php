@@ -31,13 +31,11 @@ class ExecuteAgentRun implements ShouldQueue
         ]);
 
         try {
-            // Build the prompt (skill may specify a model override)
-            [$prompt, $skillModel] = $promptBuilder->build($this->run->ticket_path, $this->run->skill);
+            [$prompt, $skillModel] = $promptBuilder->build($this->run->ticket_id, $this->run->skill);
             $this->run->update(['prompt' => $prompt]);
 
-            // Execute via Claude CLI — ticket model > skill model > default
             $timeoutSeconds = config('dashboard.agent.timeout_minutes', 30) * 60;
-            $model = $this->run->vaultNote?->frontmatter['model'] ?? $skillModel;
+            $model = $this->run->ticket?->model ?? $skillModel;
             $output = $runner->run($prompt, $timeoutSeconds, $model);
 
             if ($output->success) {
@@ -50,12 +48,11 @@ class ExecuteAgentRun implements ShouldQueue
                     'completed_at' => now(),
                 ]);
 
-                // Process the output: write to vault, update ticket
                 $outputProcessor->process($this->run);
 
                 app(\App\Services\ActivityLogger::class)->log(
                     'agent', 'completed', 'agent_run', (string) $this->run->id,
-                    $this->run->id, ['ticket' => $this->run->ticket_path, 'skill' => $this->run->skill]
+                    $this->run->id, ['ticket_id' => $this->run->ticket_id, 'skill' => $this->run->skill]
                 );
 
                 Log::info("Agent run completed", ['run_id' => $this->run->id]);

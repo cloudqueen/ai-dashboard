@@ -29,7 +29,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/api/kanban/move', [KanbanController::class, 'move'])->name('kanban.move');
     Route::post('/api/kanban/tickets', [KanbanController::class, 'store'])->name('kanban.store');
     Route::post('/api/kanban/promote', [KanbanController::class, 'promote'])->name('kanban.promote');
-    Route::get('/api/kanban/ticket/{path}', [KanbanController::class, 'show'])->name('kanban.show')->where('path', '.*');
+    Route::get('/api/kanban/ticket/{id}', [KanbanController::class, 'show'])->name('kanban.show')->whereNumber('id');
     Route::post('/api/kanban/link', [KanbanController::class, 'addLink'])->name('kanban.link');
     Route::delete('/api/kanban/link', [KanbanController::class, 'removeLink'])->name('kanban.unlink');
     Route::patch('/api/kanban/meta', [KanbanController::class, 'updateMeta'])->name('kanban.meta');

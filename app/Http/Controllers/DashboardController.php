@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AgentRun;
-use App\Models\VaultNote;
+use App\Models\Ticket;
 use App\Services\Psychology\PsychEngine;
 use App\Services\Vault\VaultManager;
 use Inertia\Inertia;
@@ -19,31 +19,25 @@ class DashboardController extends Controller
         $recentActivity = [];
         $agentStatus = ['active' => 0, 'recent' => []];
 
-        if ($vaultConfigured) {
-            // Kanban summary
-            $statuses = config('dashboard.kanban.statuses', []);
-            foreach ($statuses as $key => $label) {
-                $count = VaultNote::tickets()->where('status', $key)->count();
-                $kanbanSummary[] = ['key' => $key, 'label' => $label, 'count' => $count];
-            }
-
-            // Due soon (next 7 days)
-            $dueSoon = VaultNote::tickets()
-                ->whereNotNull('due_date')
-                ->where('due_date', '<=', now()->addDays(7))
-                ->where('status', '!=', 'done')
-                ->orderBy('due_date')
-                ->limit(5)
-                ->get(['title', 'relative_path', 'due_date', 'priority', 'status'])
-                ->toArray();
+        $statuses = config('dashboard.kanban.statuses', []);
+        foreach ($statuses as $key => $label) {
+            $count = Ticket::query()->where('status', $key)->count();
+            $kanbanSummary[] = ['key' => $key, 'label' => $label, 'count' => $count];
         }
+
+        $dueSoon = Ticket::dueSoon(7)
+            ->orderBy('due_date')
+            ->limit(5)
+            ->get(['id', 'title', 'due_date', 'priority', 'status'])
+            ->toArray();
 
         // Agent status
         $agentStatus = [
             'active' => AgentRun::active()->count(),
             'recent' => AgentRun::orderBy('created_at', 'desc')
                 ->limit(5)
-                ->get(['id', 'ticket_path', 'skill', 'status', 'duration_seconds', 'created_at'])
+                ->with('ticket:id,title')
+                ->get(['id', 'ticket_id', 'skill', 'status', 'duration_seconds', 'created_at'])
                 ->toArray(),
         ];
 

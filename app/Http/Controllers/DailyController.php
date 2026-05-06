@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\DailyCheckin;
-use App\Services\Kanban\KanbanService;
 use App\Services\Psychology\DailyCheckinService;
+use App\Services\TicketService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -97,23 +97,17 @@ class DailyController extends Controller
         $checkin = $service->getOrCreateToday();
 
         if ($checkin->isCompleted()) {
-            return response()->json([
-                'error' => 'Bereits abgeschlossen.',
-                'vault_note_path' => $checkin->vault_note_path,
-            ], 422);
+            return response()->json(['error' => 'Bereits abgeschlossen.'], 422);
         }
 
-        $notePath = $service->finish($checkin);
+        $service->finish($checkin);
 
-        return response()->json([
-            'vault_note_path' => $notePath,
-            'checkin' => $checkin->fresh(),
-        ]);
+        return response()->json(['checkin' => $checkin->fresh()]);
     }
 
-    public function createTicket(Request $request, KanbanService $kanban)
+    public function createTicket(Request $request, TicketService $tickets)
     {
-        $request->validate([
+        $data = $request->validate([
             'title' => 'required|string|max:255',
             'type' => 'nullable|string',
             'priority' => 'nullable|string',
@@ -121,30 +115,28 @@ class DailyController extends Controller
             'due' => 'nullable|string',
         ]);
 
-        // Parse due date
         $dueDate = null;
-        if ($request->input('due')) {
+        if (! empty($data['due'])) {
             try {
-                $dueDate = \Carbon\Carbon::parse($request->input('due'))->format('Y-m-d H:i');
+                $dueDate = \Carbon\Carbon::parse($data['due'])->format('Y-m-d');
             } catch (\Throwable) {
                 $dueDate = null;
             }
         }
 
-        $path = $kanban->createTicket([
-            'title' => $request->input('title'),
-            'type' => $request->input('type', 'task'),
-            'priority' => $request->input('priority', 'medium'),
+        $ticket = $tickets->create([
+            'title' => $data['title'],
+            'type' => $data['type'] ?? 'task',
+            'priority' => $data['priority'] ?? 'medium',
             'status' => 'todo',
             'assigned_to' => 'human',
-            'emotional_charge' => $request->input('emotional_charge', 'low'),
+            'emotional_charge' => $data['emotional_charge'] ?? null,
             'due_date' => $dueDate,
-            'folder' => 'inbox',
         ]);
 
         return response()->json([
-            'path' => $path,
-            'title' => $request->input('title'),
+            'id' => $ticket->id,
+            'title' => $ticket->title,
         ]);
     }
 

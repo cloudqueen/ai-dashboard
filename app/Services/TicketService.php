@@ -110,9 +110,9 @@ class TicketService
         ]);
 
         $intervention = match (true) {
-            $newStatus === 'done' => $this->psych->evaluate('task_complete', (string) $ticket->id),
-            $newStatus === 'in_progress' => $this->psych->evaluate('task_start', (string) $ticket->id),
-            $isPostpone => $this->psych->evaluate('status_change', (string) $ticket->id),
+            $newStatus === 'done' => $this->psych->evaluate('task_complete', $ticket),
+            $newStatus === 'in_progress' => $this->psych->evaluate('task_start', $ticket),
+            $isPostpone => $this->psych->evaluate('status_change', $ticket),
             default => null,
         };
 

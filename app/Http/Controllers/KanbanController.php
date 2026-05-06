@@ -2,128 +2,135 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Ticket;
+use App\Models\VaultNote;
 use App\Services\Kanban\KanbanService;
-use App\Services\Vault\VaultManager;
+use App\Services\TicketService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class KanbanController extends Controller
 {
-    public function index(Request $request, KanbanService $kanban, VaultManager $vault)
+    public function index(Request $request, KanbanService $kanban)
     {
         $filters = $request->only(['tags', 'priority', 'assigned_to']);
 
         return Inertia::render('Kanban/Index', [
-            'columns' => $vault->isConfigured() ? $kanban->getBoard($filters) : [],
-            'filterOptions' => $vault->isConfigured() ? $kanban->getFilterOptions() : [],
+            'columns' => $kanban->getBoard($filters),
+            'filterOptions' => $kanban->getFilterOptions(),
             'filters' => $filters,
-            'vaultConfigured' => $vault->isConfigured(),
         ]);
     }
 
-    public function move(Request $request, KanbanService $kanban)
+    public function move(Request $request, TicketService $tickets)
     {
         $request->validate([
-            'path' => 'required|string',
+            'id' => 'required|integer|exists:tickets,id',
             'status' => 'required|string',
         ]);
 
-        $intervention = $kanban->moveTicket($request->input('path'), $request->input('status'));
+        $ticket = Ticket::findOrFail($request->integer('id'));
+        $result = $tickets->move($ticket, $request->input('status'));
 
         $flash = ['success' => 'Ticket moved.'];
-        if ($intervention) {
-            $flash['intervention'] = $intervention;
+        if ($result['intervention']) {
+            $flash['intervention'] = $result['intervention'];
         }
 
         return back()->with($flash);
     }
 
-    public function store(Request $request, KanbanService $kanban)
+    public function store(Request $request, TicketService $tickets)
     {
-        $request->validate([
+        $data = $request->validate([
             'title' => 'required|string|max:255',
             'type' => 'nullable|string',
             'status' => 'nullable|string',
             'priority' => 'nullable|string',
             'assigned_to' => 'nullable|string',
+            'agent_skill' => 'nullable|string',
             'description' => 'nullable|string',
             'tags' => 'nullable|array',
             'due_date' => 'nullable|date',
-            'folder' => 'nullable|string',
+            'emotional_charge' => 'nullable|string',
+            'system_level' => 'nullable|integer',
         ]);
 
-        $kanban->createTicket($request->all());
+        $tickets->create($data);
 
         return back()->with('success', 'Ticket created.');
     }
 
-    public function show(string $path, KanbanService $kanban)
+    public function show(int $id, KanbanService $kanban)
     {
-        $path = urldecode($path);
-        $note = \App\Models\VaultNote::where('relative_path', $path)->firstOrFail();
-        $contextLinks = $kanban->getContextLinks($path);
+        $ticket = Ticket::findOrFail($id);
+        $contextLinks = $kanban->getContextLinks($ticket);
 
         return response()->json([
-            'ticket' => $note,
+            'ticket' => $ticket,
             'contextLinks' => $contextLinks,
         ]);
     }
 
-    public function addLink(Request $request, KanbanService $kanban)
+    public function addLink(Request $request, TicketService $tickets)
     {
         $request->validate([
-            'ticket_path' => 'required|string',
+            'ticket_id' => 'required|integer|exists:tickets,id',
             'link_path' => 'required|string',
         ]);
 
-        $kanban->addContextLink($request->input('ticket_path'), $request->input('link_path'));
+        $ticket = Ticket::findOrFail($request->integer('ticket_id'));
+        $tickets->addContextLink($ticket, $request->input('link_path'));
 
         return back()->with('success', 'Context link added.');
     }
 
-    public function removeLink(Request $request, KanbanService $kanban)
+    public function removeLink(Request $request, TicketService $tickets)
     {
         $request->validate([
-            'ticket_path' => 'required|string',
+            'ticket_id' => 'required|integer|exists:tickets,id',
             'link_path' => 'required|string',
         ]);
 
-        $kanban->removeContextLink($request->input('ticket_path'), $request->input('link_path'));
+        $ticket = Ticket::findOrFail($request->integer('ticket_id'));
+        $tickets->removeContextLink($ticket, $request->input('link_path'));
 
         return back()->with('success', 'Context link removed.');
     }
 
-    public function destroy(Request $request, KanbanService $kanban)
+    public function destroy(Request $request, TicketService $tickets)
     {
-        $request->validate([
-            'path' => 'required|string',
-        ]);
+        $request->validate(['id' => 'required|integer|exists:tickets,id']);
 
-        $kanban->deleteTicket($request->input('path'));
+        $ticket = Ticket::findOrFail($request->integer('id'));
+        $tickets->delete($ticket);
 
         return back()->with('success', 'Ticket gelöscht.');
     }
 
-    public function updateMeta(Request $request, KanbanService $kanban)
+    public function updateMeta(Request $request, TicketService $tickets)
     {
         $request->validate([
-            'path' => 'required|string',
+            'id' => 'required|integer|exists:tickets,id',
             'model' => 'nullable|string',
             'agent_skill' => 'nullable|string',
             'depends_on' => 'nullable|array',
+            'priority' => 'nullable|string',
+            'due_date' => 'nullable|date',
+            'tags' => 'nullable|array',
+            'emotional_charge' => 'nullable|string',
+            'system_level' => 'nullable|integer',
         ]);
 
-        $fields = array_filter(
-            $request->only(['model', 'agent_skill', 'depends_on']),
-            fn ($v) => $v !== null
-        );
+        $ticket = Ticket::findOrFail($request->integer('id'));
+        $fields = $request->only(['model', 'agent_skill', 'depends_on', 'priority', 'due_date', 'tags', 'emotional_charge', 'system_level']);
 
-        $kanban->updateTicketMeta($request->input('path'), $fields);
+        $tickets->update($ticket, array_filter($fields, fn ($v) => $v !== null));
 
         return back()->with('success', 'Ticket updated.');
     }
 
-    public function promote(Request $request, KanbanService $kanban)
+    public function promote(Request $request, TicketService $tickets)
     {
         $request->validate([
             'path' => 'required|string',
@@ -132,7 +139,8 @@ class KanbanController extends Controller
             'status' => 'nullable|string',
         ]);
 
-        $kanban->promoteNote($request->input('path'), $request->except('path'));
+        $note = VaultNote::where('relative_path', $request->input('path'))->firstOrFail();
+        $tickets->promoteFromVaultNote($note, $request->only(['type', 'priority', 'status']));
 
         return back()->with('success', 'Note promoted to ticket.');
     }

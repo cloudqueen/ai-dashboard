@@ -10,12 +10,18 @@ class PsychIntervention extends Model
         'framework',
         'intervention_type',
         'trigger',
+        'ticket_id',
         'ticket_path',
         'content',
         'metadata',
         'was_helpful',
         'dismissed',
     ];
+
+    public function ticket(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Ticket::class);
+    }
 
     protected function casts(): array
     {

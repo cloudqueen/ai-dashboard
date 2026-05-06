@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AgentRun;
 use App\Models\AgentSkill;
-use App\Models\VaultNote;
+use App\Models\Ticket;
 use App\Services\Agent\AgentOrchestrator;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -29,18 +29,18 @@ class AgentController extends Controller
     public function show(AgentRun $agentRun)
     {
         return Inertia::render('Agents/Show', [
-            'run' => $agentRun->load('vaultNote'),
+            'run' => $agentRun->load('ticket'),
         ]);
     }
 
     public function triggerRun(Request $request, AgentOrchestrator $orchestrator)
     {
         $request->validate([
-            'ticket_path' => 'required|string',
+            'ticket_id' => 'required|integer|exists:tickets,id',
             'skill' => 'nullable|string',
         ]);
 
-        $ticket = VaultNote::where('relative_path', $request->input('ticket_path'))->firstOrFail();
+        $ticket = Ticket::findOrFail($request->integer('ticket_id'));
         $orchestrator->dispatchAgentRun($ticket, $request->input('skill'));
 
         return back()->with('success', 'Agent run dispatched.');

@@ -2,7 +2,8 @@
 
 namespace App\Services\Agent;
 
-use App\Models\AgentSkill;
+use App\Models\AgentRun;
+use App\Models\Ticket;
 use App\Services\Vault\VaultManager;
 
 class PromptBuilder
@@ -13,44 +14,32 @@ class PromptBuilder
     ) {}
 
     /**
-     * Build a full prompt for an agent run from a ticket and skill.
+     * Build a full prompt for an agent run.
      * Returns [prompt, model] — model may be null (use default).
      */
-    public function build(string $ticketPath, string $skillName): array
+    public function build(int $ticketId, string $skillName): array
     {
-        $note = $this->vault->readNote($ticketPath);
+        $ticket = Ticket::findOrFail($ticketId);
 
-        if (! $note) {
-            throw new \RuntimeException("Ticket not found: {$ticketPath}");
-        }
-
-        // Try to load skill (vault first, then DB)
         $skill = $this->skillLoader->load($skillName);
 
         if (! $skill) {
-            return [$this->buildGenericPrompt($note->body, $note->frontmatter), null];
+            return [$this->buildGenericPrompt($ticket), null];
         }
 
-        // Gather context from wikilinks + context_links + dependencies
-        $context = $this->gatherContext($note);
+        $context = $this->gatherContext($ticket);
 
-        if ($skill['source'] === 'vault') {
-            $prompt = $this->buildVaultSkillPrompt($skill, $note, $context);
-        } else {
-            $prompt = $this->buildDbSkillPrompt($skill, $note, $context);
-        }
+        $prompt = $skill['source'] === 'vault'
+            ? $this->buildVaultSkillPrompt($skill, $ticket, $context)
+            : $this->buildDbSkillPrompt($skill, $ticket, $context);
 
         return [$prompt, $skill['model'] ?? null];
     }
 
-    /**
-     * Build prompt using a vault-based SKILL.md.
-     */
-    private function buildVaultSkillPrompt(array $skill, $note, string $context): string
+    private function buildVaultSkillPrompt(array $skill, Ticket $ticket, string $context): string
     {
         $prompt = $skill['system_prompt'];
 
-        // Append skill reference files
         $references = $skill['references'] ?? [];
         if (! empty($references)) {
             $prompt .= "\n\n## Skill-Referenzen\n\n";
@@ -59,14 +48,11 @@ class PromptBuilder
             }
         }
 
-        // Append the task
         $prompt .= "\n\n## Aufgabe\n\n";
-        $prompt .= "### {$note->title()}\n\n{$note->body}\n\n";
+        $prompt .= "### {$ticket->title}\n\n" . ($ticket->description ?? '') . "\n\n";
 
-        // Append frontmatter
-        $prompt .= "### Metadaten\n" . json_encode($note->frontmatter, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n\n";
+        $prompt .= "### Metadaten\n" . json_encode($this->ticketMeta($ticket), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n\n";
 
-        // Append context
         if ($context) {
             $prompt .= "## Kontext\n\n{$context}\n";
         }
@@ -74,21 +60,16 @@ class PromptBuilder
         return $prompt;
     }
 
-    /**
-     * Build prompt using a DB-based agent_skill (legacy).
-     */
-    private function buildDbSkillPrompt(array $skill, $note, string $context): string
+    private function buildDbSkillPrompt(array $skill, Ticket $ticket, string $context): string
     {
         $prompt = $skill['prompt_template'] ?? '';
 
-        // Substitute placeholders
-        $prompt = str_replace('{{ticket_content}}', $note->body, $prompt);
-        $prompt = str_replace('{{ticket_title}}', $note->title(), $prompt);
-        $prompt = str_replace('{{ticket_frontmatter}}', json_encode($note->frontmatter, JSON_PRETTY_PRINT), $prompt);
+        $prompt = str_replace('{{ticket_content}}', $ticket->description ?? '', $prompt);
+        $prompt = str_replace('{{ticket_title}}', $ticket->title, $prompt);
+        $prompt = str_replace('{{ticket_frontmatter}}', json_encode($this->ticketMeta($ticket), JSON_PRETTY_PRINT), $prompt);
         $prompt = str_replace('{{context_notes}}', $context, $prompt);
         $prompt = str_replace('{{skill_references}}', '', $prompt);
 
-        // Prepend system prompt
         if ($skill['system_prompt'] ?? null) {
             $prompt = $skill['system_prompt'] . "\n\n" . $prompt;
         }
@@ -97,43 +78,28 @@ class PromptBuilder
     }
 
     /**
-     * Gather all context: wikilinks + context_links + dependency outputs.
+     * Gather context from context_links (vault notes) + dependency outputs (other tickets' last agent run).
      */
-    private function gatherContext($note): string
+    private function gatherContext(Ticket $ticket): string
     {
         $context = '';
 
-        // Wikilinks
-        foreach ($note->wikilinks as $link) {
-            $linkedPath = $this->vault->resolveWikilink($link['target']);
-            if ($linkedPath) {
-                $linkedNote = $this->vault->readNote($linkedPath);
-                if ($linkedNote) {
-                    $context .= "--- Context: {$link['target']} ---\n{$linkedNote->body}\n\n";
-                }
+        foreach ($ticket->context_links ?? [] as $linkPath) {
+            $note = $this->vault->readNote($linkPath);
+            if ($note) {
+                $label = $note->title();
+                $context .= "--- Context: {$label} ---\n{$note->body}\n\n";
             }
         }
 
-        // Explicit context_links
-        $contextLinks = $note->frontmatter['context_links'] ?? [];
-        foreach ($contextLinks as $linkPath) {
-            $linkedNote = $this->vault->readNote($linkPath);
-            if ($linkedNote) {
-                $label = $linkedNote->title();
-                $context .= "--- Context: {$label} ---\n{$linkedNote->body}\n\n";
-            }
-        }
-
-        // Dependency outputs
-        $dependsOn = $note->frontmatter['depends_on'] ?? [];
-        foreach ($dependsOn as $depPath) {
-            $lastRun = \App\Models\AgentRun::where('ticket_path', $depPath)
+        foreach ($ticket->depends_on ?? [] as $depTicketId) {
+            $lastRun = AgentRun::where('ticket_id', $depTicketId)
                 ->where('status', 'completed')
                 ->latest('completed_at')
                 ->first();
             if ($lastRun) {
-                $depNote = $this->vault->readNote($depPath);
-                $label = $depNote ? $depNote->title() : $depPath;
+                $depTicket = Ticket::find($depTicketId);
+                $label = $depTicket?->title ?? "Ticket #{$depTicketId}";
                 $context .= "--- Dependency output: {$label} ---\n{$lastRun->summary}\n\n";
             }
         }
@@ -141,13 +107,24 @@ class PromptBuilder
         return $context;
     }
 
-    private function buildGenericPrompt(string $body, array $frontmatter): string
+    private function ticketMeta(Ticket $ticket): array
     {
-        $type = $frontmatter['type'] ?? 'task';
+        return [
+            'type' => $ticket->type,
+            'status' => $ticket->status,
+            'priority' => $ticket->priority,
+            'tags' => $ticket->tags,
+            'due_date' => $ticket->due_date?->toDateString(),
+            'emotional_charge' => $ticket->emotional_charge,
+            'system_level' => $ticket->system_level,
+        ];
+    }
 
-        return "You are an AI assistant helping with a {$type}. "
+    private function buildGenericPrompt(Ticket $ticket): string
+    {
+        return "You are an AI assistant helping with a {$ticket->type}. "
             . "Read the following task description and complete it thoroughly.\n\n"
-            . "## Task\n\n{$body}\n\n"
+            . "## Task\n\n### {$ticket->title}\n\n" . ($ticket->description ?? '') . "\n\n"
             . "Provide your complete response. Be thorough and actionable.";
     }
 }

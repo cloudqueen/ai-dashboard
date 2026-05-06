@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Models\Routine;
 use App\Models\RoutineRun;
-use App\Services\Kanban\KanbanService;
+use App\Services\TicketService;
 use Cron\CronExpression;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 class RoutineScheduler
 {
     public function __construct(
-        private KanbanService $kanban,
+        private TicketService $tickets,
     ) {}
 
     /**
@@ -53,8 +53,7 @@ class RoutineScheduler
         $date = now()->format('Y-m-d');
         $title = "{$routine->name} — {$date}";
 
-        // Create a kanban ticket
-        $ticketData = [
+        $ticket = $this->tickets->create([
             'title' => $title,
             'type' => 'task',
             'status' => 'ready_for_agent',
@@ -62,50 +61,29 @@ class RoutineScheduler
             'assigned_to' => 'agent',
             'agent_skill' => $routine->skill,
             'description' => $routine->prompt_template,
-            'folder' => $routine->output_folder ?? 'inbox',
-            'due_date' => now()->format('Y-m-d H:i'),
-        ];
+            'due_date' => now()->format('Y-m-d'),
+            'context_links' => $routine->context_links ?? [],
+            'model' => $routine->model,
+            'routine_id' => $routine->id,
+        ]);
 
-        // Add context links to frontmatter
-        if (! empty($routine->context_links)) {
-            $ticketData['context_links'] = $routine->context_links;
-        }
-
-        // Add model override
-        if ($routine->model) {
-            $ticketData['model'] = $routine->model;
-        }
-
-        $ticketPath = $this->kanban->createTicket($ticketData);
-
-        // If context_links, write them to frontmatter
-        if (! empty($routine->context_links)) {
-            app(\App\Services\Vault\VaultManager::class)->updateFrontmatter($ticketPath, [
-                'context_links' => $routine->context_links,
-                'model' => $routine->model,
-                'routine_id' => $routine->id,
-            ]);
-        }
-
-        // Create routine run record
         $run = RoutineRun::create([
             'routine_id' => $routine->id,
-            'ticket_path' => $ticketPath,
+            'ticket_id' => $ticket->id,
             'status' => 'pending',
             'started_at' => now(),
         ]);
 
-        // Update next run time
         $this->updateNextRun($routine);
 
         app(ActivityLogger::class)->log(
             'system', 'routine_dispatched', 'routine', (string) $routine->id,
-            details: ['name' => $routine->name, 'ticket' => $ticketPath]
+            details: ['name' => $routine->name, 'ticket_id' => $ticket->id]
         );
 
         Log::info("Routine dispatched", [
             'routine' => $routine->name,
-            'ticket' => $ticketPath,
+            'ticket_id' => $ticket->id,
         ]);
 
         return $run;
@@ -143,8 +121,11 @@ class RoutineScheduler
             ->get();
 
         foreach ($pendingRuns as $run) {
-            // Find the agent run for this ticket
-            $agentRun = \App\Models\AgentRun::where('ticket_path', $run->ticket_path)
+            if (! $run->ticket_id) {
+                continue;
+            }
+
+            $agentRun = \App\Models\AgentRun::where('ticket_id', $run->ticket_id)
                 ->latest()
                 ->first();
 

@@ -4,32 +4,31 @@ namespace App\Services\Psychology;
 
 use App\Models\PsychIntervention;
 use App\Models\TaskEvent;
-use App\Models\VaultNote;
+use App\Models\Ticket;
 
 class PsychEngine
 {
     /**
-     * Evaluate a ticket event and generate interventions if needed.
+     * Evaluate a trigger and generate an intervention if needed.
      */
-    public function evaluate(string $trigger, ?string $ticketPath = null): ?PsychIntervention
+    public function evaluate(string $trigger, Ticket|int|null $ticket = null): ?PsychIntervention
     {
         if (! app(\App\Services\SettingsService::class)->psychologyEnabled()) {
             return null;
         }
 
+        $ticket = is_int($ticket) ? Ticket::find($ticket) : $ticket;
+
         return match ($trigger) {
-            'status_change' => $this->onStatusChange($ticketPath),
-            'task_start' => $this->onTaskStart($ticketPath),
-            'task_complete' => $this->onTaskComplete($ticketPath),
+            'status_change' => $this->onStatusChange($ticket),
+            'task_start' => $this->onTaskStart($ticket),
+            'task_complete' => $this->onTaskComplete($ticket),
             'dashboard_load' => $this->onDashboardLoad(),
             'wip_exceeded' => $this->onWipExceeded(),
             default => null,
         };
     }
 
-    /**
-     * Get active (undismissed, unrated) interventions.
-     */
     public function getActiveInterventions(int $limit = 3): array
     {
         return PsychIntervention::active()
@@ -39,21 +38,15 @@ class PsychEngine
             ->toArray();
     }
 
-    /**
-     * Get psychology insights for the dashboard.
-     */
     public function getDashboardInsights(): array
     {
-        $now = now();
-        $thirtyDaysAgo = $now->copy()->subDays(30);
+        $thirtyDaysAgo = now()->copy()->subDays(30);
 
-        // Completion stats
         $completed = TaskEvent::where('event_type', 'status_changed')
             ->where('to_status', 'done')
             ->where('created_at', '>=', $thirtyDaysAgo)
             ->count();
 
-        // Postponement detection
         $postponements = TaskEvent::where('event_type', 'status_changed')
             ->where('created_at', '>=', $thirtyDaysAgo)
             ->whereColumn('from_status', '!=', 'to_status')
@@ -61,23 +54,18 @@ class PsychEngine
             ->whereIn('to_status', ['backlog', 'todo'])
             ->count();
 
-        // High emotional_charge tasks sitting unfinished
-        $avoidedTasks = VaultNote::tickets()
+        $avoidedTasks = Ticket::query()
             ->whereIn('status', ['backlog', 'todo'])
-            ->whereRaw("json_extract(frontmatter, '$.emotional_charge') = 'high'")
+            ->where('emotional_charge', 'high')
             ->count();
 
-        // Current WIP
-        $wipCount = VaultNote::tickets()
+        $wipCount = Ticket::query()
             ->whereIn('status', ['in_progress', 'ready_for_agent'])
             ->count();
 
         $settings = app(\App\Services\SettingsService::class);
         $wipSoft = $settings->wipSoftLimit();
         $wipHard = $settings->wipHardLimit();
-
-        // Streak: consecutive days with at least one completion
-        $streak = $this->calculateStreak();
 
         return [
             'completed_30d' => $completed,
@@ -87,99 +75,60 @@ class PsychEngine
             'wip_soft_limit' => $wipSoft,
             'wip_hard_limit' => $wipHard,
             'wip_status' => $wipCount >= $wipHard ? 'overloaded' : ($wipCount >= $wipSoft ? 'warning' : 'ok'),
-            'streak_days' => $streak,
+            'streak_days' => $this->calculateStreak(),
             'active_interventions' => $this->getActiveInterventions(),
         ];
     }
 
-    // --- Chimp Paradox ---
-
-    private function onStatusChange(?string $ticketPath): ?PsychIntervention
+    private function onStatusChange(?Ticket $ticket): ?PsychIntervention
     {
-        if (! $ticketPath) {
+        if (! $ticket) {
             return null;
         }
 
-        $note = VaultNote::where('relative_path', $ticketPath)->first();
-        if (! $note) {
-            return null;
-        }
-
-        // Detect avoidance: ticket moved backwards
-        $postponeCount = $note->frontmatter['postpone_count'] ?? 0;
         $threshold = config('dashboard.psychology.postpone_threshold', 3);
 
-        if ($postponeCount >= $threshold) {
-            return $this->createChimpIntervention(
-                'avoidance_nudge',
-                'status_change',
-                $ticketPath,
-                $this->generateAvoidanceNudge($note)
-            );
+        if ($ticket->postpone_count >= $threshold) {
+            return $this->createChimpIntervention('avoidance_nudge', 'status_change', $ticket,
+                $this->generateAvoidanceNudge($ticket));
         }
 
         return null;
     }
 
-    private function onTaskStart(?string $ticketPath): ?PsychIntervention
+    private function onTaskStart(?Ticket $ticket): ?PsychIntervention
     {
-        if (! $ticketPath) {
+        if (! $ticket) {
             return null;
         }
 
-        $note = VaultNote::where('relative_path', $ticketPath)->first();
-        if (! $note) {
-            return null;
+        $charge = $ticket->emotional_charge ?? 'low';
+
+        if ($charge === 'high') {
+            return $this->createChimpIntervention('reframe', 'task_start', $ticket,
+                $this->generateReframe($ticket));
         }
 
-        $emotionalCharge = $note->frontmatter['emotional_charge'] ?? 'low';
-
-        // Chimp: high emotional charge — offer reframe
-        if ($emotionalCharge === 'high') {
-            return $this->createChimpIntervention(
-                'reframe',
-                'task_start',
-                $ticketPath,
-                $this->generateReframe($note)
-            );
-        }
-
-        // ZRM: medium+ emotional charge — somatic check-in
-        if (in_array($emotionalCharge, ['medium', 'high'])) {
-            return $this->createZrmIntervention(
-                'somatic_checkin',
-                'task_start',
-                $ticketPath,
-                $this->generateSomaticCheckin($note)
-            );
+        if (in_array($charge, ['medium', 'high'])) {
+            return $this->createZrmIntervention('somatic_checkin', 'task_start', $ticket,
+                $this->generateSomaticCheckin($ticket));
         }
 
         return null;
     }
 
-    private function onTaskComplete(?string $ticketPath): ?PsychIntervention
+    private function onTaskComplete(?Ticket $ticket): ?PsychIntervention
     {
-        $note = $ticketPath ? VaultNote::where('relative_path', $ticketPath)->first() : null;
-        $emotionalCharge = $note ? ($note->frontmatter['emotional_charge'] ?? 'low') : 'low';
+        $charge = $ticket?->emotional_charge ?? 'low';
 
-        // Celebrate high-charge completions more
-        if ($emotionalCharge === 'high') {
-            return $this->createChimpIntervention(
-                'celebration',
-                'task_complete',
-                $ticketPath,
-                $this->generateCelebration($note, intense: true)
-            );
+        if ($charge === 'high') {
+            return $this->createChimpIntervention('celebration', 'task_complete', $ticket,
+                $this->generateCelebration($ticket, intense: true));
         }
 
-        // ZRM: resource activation after completing something
-        if ($note) {
-            return $this->createZrmIntervention(
-                'resource_activation',
-                'task_complete',
-                $ticketPath,
-                $this->generateResourceActivation($note)
-            );
+        if ($ticket) {
+            return $this->createZrmIntervention('resource_activation', 'task_complete', $ticket,
+                $this->generateResourceActivation($ticket));
         }
 
         return null;
@@ -187,48 +136,38 @@ class PsychEngine
 
     private function onDashboardLoad(): ?PsychIntervention
     {
-        // Check for avoided high-charge tasks
-        $avoided = VaultNote::tickets()
+        $avoided = Ticket::query()
             ->whereIn('status', ['backlog', 'todo'])
-            ->whereRaw("json_extract(frontmatter, '$.emotional_charge') = 'high'")
-            ->whereRaw("json_extract(frontmatter, '$.postpone_count') >= ?", [2])
-            ->oldest('vault_modified_at')
+            ->where('emotional_charge', 'high')
+            ->where('postpone_count', '>=', 2)
+            ->oldest('updated_at')
             ->first();
 
         if ($avoided) {
-            // Don't spam — check if we already nudged recently
-            $recent = PsychIntervention::where('ticket_path', $avoided->relative_path)
+            $recent = PsychIntervention::where('ticket_id', $avoided->id)
                 ->where('intervention_type', 'avoidance_nudge')
                 ->where('created_at', '>=', now()->subHours(24))
                 ->exists();
 
             if (! $recent) {
-                return $this->createChimpIntervention(
-                    'avoidance_nudge',
-                    'dashboard_load',
-                    $avoided->relative_path,
-                    $this->generateAvoidanceNudge($avoided)
-                );
+                return $this->createChimpIntervention('avoidance_nudge', 'dashboard_load', $avoided,
+                    $this->generateAvoidanceNudge($avoided));
             }
         }
 
-        // ZRM: daily motto-goal reminder
         return $this->dailyMottoGoal();
     }
 
     private function onWipExceeded(): ?PsychIntervention
     {
-        $wipCount = VaultNote::tickets()
+        $wipCount = Ticket::query()
             ->whereIn('status', ['in_progress', 'ready_for_agent'])
             ->count();
 
         $wipHard = app(\App\Services\SettingsService::class)->wipHardLimit();
 
         if ($wipCount >= $wipHard) {
-            return $this->createChimpIntervention(
-                'reframe',
-                'wip_exceeded',
-                null,
+            return $this->createChimpIntervention('reframe', 'wip_exceeded', null,
                 "Your chimp is excited about new things — that's natural! But you have **{$wipCount} tasks in progress**. "
                 . "Your human brain knows finishing one thing creates more momentum than starting five. "
                 . "Pick the one task closest to done and finish it first. The other ideas aren't going anywhere."
@@ -238,12 +177,9 @@ class PsychEngine
         return null;
     }
 
-    // --- Content generators ---
-
-    private function generateReframe(VaultNote $note): string
+    private function generateReframe(Ticket $ticket): string
     {
-        $title = $note->title;
-        $charge = $note->frontmatter['emotional_charge'] ?? 'high';
+        $title = $ticket->title;
 
         $reframes = [
             "Your chimp sees **\"{$title}\"** as a threat — that's just your inner alarm system. "
@@ -262,10 +198,10 @@ class PsychEngine
         return $reframes[array_rand($reframes)];
     }
 
-    private function generateAvoidanceNudge(VaultNote $note): string
+    private function generateAvoidanceNudge(Ticket $ticket): string
     {
-        $title = $note->title;
-        $count = $note->frontmatter['postpone_count'] ?? 0;
+        $title = $ticket->title;
+        $count = $ticket->postpone_count;
 
         $nudges = [
             "You've postponed **\"{$title}\"** {$count} times. Your chimp has been winning this one. "
@@ -284,9 +220,9 @@ class PsychEngine
         return $nudges[array_rand($nudges)];
     }
 
-    private function generateSomaticCheckin(VaultNote $note): string
+    private function generateSomaticCheckin(Ticket $ticket): string
     {
-        $title = $note->title;
+        $title = $ticket->title;
 
         return "Before starting **\"{$title}\"**, take a moment for a body check-in (ZRM Strudelmodell):\n\n"
             . "1. Close your eyes briefly. How does your body feel right now?\n"
@@ -296,9 +232,9 @@ class PsychEngine
             . "Maybe change the environment, the approach, or the scope.";
     }
 
-    private function generateResourceActivation(VaultNote $note): string
+    private function generateResourceActivation(Ticket $ticket): string
     {
-        $title = $note->title;
+        $title = $ticket->title;
 
         $activations = [
             "You just completed **\"{$title}\"**. Take a moment to notice how that feels in your body. "
@@ -316,9 +252,9 @@ class PsychEngine
         return $activations[array_rand($activations)];
     }
 
-    private function generateCelebration(VaultNote $note, bool $intense = false): string
+    private function generateCelebration(Ticket $ticket, bool $intense = false): string
     {
-        $title = $note->title;
+        $title = $ticket->title;
 
         if ($intense) {
             return "You conquered **\"{$title}\"** — a task your chimp really didn't want to face. "
@@ -332,7 +268,6 @@ class PsychEngine
 
     private function dailyMottoGoal(): ?PsychIntervention
     {
-        // Only once per day
         $today = PsychIntervention::where('intervention_type', 'motto_goal')
             ->where('trigger', 'dashboard_load')
             ->whereDate('created_at', today())
@@ -356,34 +291,28 @@ class PsychEngine
             . "Your shiny-object chimp will suggest detours. Smile at it and stay the course.",
         ];
 
-        return $this->createZrmIntervention(
-            'motto_goal',
-            'dashboard_load',
-            null,
-            $mottos[array_rand($mottos)]
-        );
+        return $this->createZrmIntervention('motto_goal', 'dashboard_load', null,
+            $mottos[array_rand($mottos)]);
     }
 
-    // --- Helpers ---
-
-    private function createChimpIntervention(string $type, string $trigger, ?string $ticketPath, string $content): PsychIntervention
+    private function createChimpIntervention(string $type, string $trigger, ?Ticket $ticket, string $content): PsychIntervention
     {
         return PsychIntervention::create([
             'framework' => 'chimp',
             'intervention_type' => $type,
             'trigger' => $trigger,
-            'ticket_path' => $ticketPath,
+            'ticket_id' => $ticket?->id,
             'content' => $content,
         ]);
     }
 
-    private function createZrmIntervention(string $type, string $trigger, ?string $ticketPath, string $content): PsychIntervention
+    private function createZrmIntervention(string $type, string $trigger, ?Ticket $ticket, string $content): PsychIntervention
     {
         return PsychIntervention::create([
             'framework' => 'zrm',
             'intervention_type' => $type,
             'trigger' => $trigger,
-            'ticket_path' => $ticketPath,
+            'ticket_id' => $ticket?->id,
             'content' => $content,
         ]);
     }

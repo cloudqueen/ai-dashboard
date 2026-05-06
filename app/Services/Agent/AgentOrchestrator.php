@@ -4,7 +4,7 @@ namespace App\Services\Agent;
 
 use App\Models\AgentRun;
 use App\Models\CostEvent;
-use App\Models\VaultNote;
+use App\Models\Ticket;
 use App\Jobs\ExecuteAgentRun;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -39,7 +39,7 @@ class AgentOrchestrator
         $budgetLimit = config('dashboard.agent.monthly_budget_usd');
 
         if (! $budgetLimit) {
-            return true; // No limit configured
+            return true;
         }
 
         $monthlySpend = CostEvent::whereYear('occurred_at', now()->year)
@@ -71,8 +71,10 @@ class AgentOrchestrator
             return;
         }
 
-        $readyTickets = VaultNote::where('status', 'ready_for_agent')
-            ->whereNotIn('relative_path', AgentRun::active()->pluck('ticket_path'))
+        $activeTicketIds = AgentRun::active()->pluck('ticket_id')->filter()->all();
+
+        $readyTickets = Ticket::readyForAgent()
+            ->whereNotIn('id', $activeTicketIds)
             ->orderByRaw("CASE priority
                 WHEN 'critical' THEN 1
                 WHEN 'high' THEN 2
@@ -99,25 +101,23 @@ class AgentOrchestrator
     /**
      * Dispatch an agent run with atomic checkout to prevent double-dispatch.
      */
-    public function dispatchAgentRun(VaultNote $ticket, ?string $skillOverride = null): ?AgentRun
+    public function dispatchAgentRun(Ticket $ticket, ?string $skillOverride = null): ?AgentRun
     {
-        $skill = $skillOverride ?? $ticket->frontmatter['agent_skill'] ?? $this->inferSkill($ticket);
+        $skill = $skillOverride ?? $ticket->agent_skill ?? $this->inferSkill($ticket);
 
-        // Atomic checkout: only create run if no active run exists for this ticket
         return DB::transaction(function () use ($ticket, $skill) {
-            $exists = AgentRun::where('ticket_path', $ticket->relative_path)
+            $exists = AgentRun::where('ticket_id', $ticket->id)
                 ->whereIn('status', ['queued', 'running'])
                 ->lockForUpdate()
                 ->exists();
 
             if ($exists) {
-                Log::info("Skipping already-active ticket", ['ticket' => $ticket->relative_path]);
+                Log::info("Skipping already-active ticket", ['ticket_id' => $ticket->id]);
                 return null;
             }
 
             $run = AgentRun::create([
-                'vault_note_id' => $ticket->id,
-                'ticket_path' => $ticket->relative_path,
+                'ticket_id' => $ticket->id,
                 'skill' => $skill,
                 'status' => 'queued',
             ]);
@@ -126,12 +126,12 @@ class AgentOrchestrator
 
             app(\App\Services\ActivityLogger::class)->log(
                 'system', 'dispatched', 'agent_run', (string) $run->id,
-                $run->id, ['ticket' => $ticket->relative_path, 'skill' => $skill]
+                $run->id, ['ticket_id' => $ticket->id, 'title' => $ticket->title, 'skill' => $skill]
             );
 
             Log::info("Agent run dispatched", [
                 'run_id' => $run->id,
-                'ticket' => $ticket->relative_path,
+                'ticket_id' => $ticket->id,
                 'skill' => $skill,
             ]);
 
@@ -139,9 +139,6 @@ class AgentOrchestrator
         });
     }
 
-    /**
-     * Check for timed-out runs and mark them.
-     */
     public function checkForTimedOutRuns(): void
     {
         $timeout = config('dashboard.agent.timeout_minutes', 30);
@@ -159,7 +156,7 @@ class AgentOrchestrator
 
             app(\App\Services\ActivityLogger::class)->log(
                 'system', 'timed_out', 'agent_run', (string) $run->id,
-                $run->id, ['ticket' => $run->ticket_path]
+                $run->id, ['ticket_id' => $run->ticket_id]
             );
 
             Log::warning("Agent run timed out", ['run_id' => $run->id]);
@@ -169,28 +166,25 @@ class AgentOrchestrator
     /**
      * Check if all depends_on tickets are done.
      */
-    private function dependenciesMet(VaultNote $ticket): bool
+    private function dependenciesMet(Ticket $ticket): bool
     {
-        $dependsOn = $ticket->frontmatter['depends_on'] ?? [];
+        $dependsOn = $ticket->depends_on ?? [];
 
         if (empty($dependsOn)) {
             return true;
         }
 
-        foreach ($dependsOn as $depPath) {
-            $dep = VaultNote::where('relative_path', $depPath)->first();
-            if (! $dep || $dep->status !== 'done') {
-                return false;
-            }
-        }
+        $undone = Ticket::whereIn('id', $dependsOn)
+            ->where('status', '!=', 'done')
+            ->exists();
 
-        return true;
+        return ! $undone;
     }
 
     /**
      * Infer the best skill for a ticket based on its type.
      */
-    private function inferSkill(VaultNote $ticket): string
+    private function inferSkill(Ticket $ticket): string
     {
         return match ($ticket->type) {
             'research' => 'research',

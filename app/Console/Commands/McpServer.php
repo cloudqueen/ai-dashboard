@@ -3,8 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\DailyCheckin;
-use App\Models\VaultNote;
-use App\Services\Kanban\KanbanService;
 use App\Services\Psychology\DailyCheckinService;
 use App\Services\Vault\VaultManager;
 use Illuminate\Console\Command;
@@ -224,32 +222,31 @@ class McpServer extends Command
 
     private function toolCreateTicket(array $args): string
     {
-        $kanban = app(KanbanService::class);
+        $tickets = app(\App\Services\TicketService::class);
 
         $dueDate = null;
         if (! empty($args['due_date'])) {
-            try { $dueDate = Carbon::parse($args['due_date'])->format('Y-m-d H:i'); } catch (\Throwable) {}
+            try { $dueDate = Carbon::parse($args['due_date'])->format('Y-m-d'); } catch (\Throwable) {}
         }
 
-        $path = $kanban->createTicket([
+        $ticket = $tickets->create([
             'title' => $args['title'],
             'type' => $args['type'] ?? 'task',
             'priority' => $args['priority'] ?? 'medium',
             'status' => ($args['assigned_to'] ?? 'human') === 'agent' ? 'ready_for_agent' : 'todo',
             'assigned_to' => $args['assigned_to'] ?? 'human',
-            'emotional_charge' => $args['emotional_charge'] ?? 'low',
+            'emotional_charge' => $args['emotional_charge'] ?? null,
             'agent_skill' => $args['agent_skill'] ?? null,
             'due_date' => $dueDate,
             'description' => $args['description'] ?? '',
-            'folder' => 'inbox',
         ]);
 
-        return "Ticket erstellt: {$args['title']}\nPfad: {$path}\nPriorität: " . ($args['priority'] ?? 'medium');
+        return "Ticket erstellt: {$ticket->title}\nID: #{$ticket->id}\nPriorität: {$ticket->priority}";
     }
 
     private function toolListTickets(array $args): array
     {
-        $query = VaultNote::tickets()
+        $query = \App\Models\Ticket::query()
             ->orderByRaw("CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END")
             ->orderBy('due_date');
 
@@ -260,13 +257,13 @@ class McpServer extends Command
         }
 
         return $query->limit($args['limit'] ?? 20)
-            ->get(['title', 'relative_path', 'status', 'priority', 'due_date', 'assigned_to', 'type'])
+            ->get()
             ->map(fn ($t) => [
+                'id' => $t->id,
                 'title' => $t->title,
-                'path' => $t->relative_path,
                 'status' => $t->status,
                 'priority' => $t->priority,
-                'due_date' => $t->due_date?->format('d.m.Y H:i'),
+                'due_date' => $t->due_date?->format('d.m.Y'),
                 'assigned_to' => $t->assigned_to,
                 'type' => $t->type,
             ])
@@ -312,49 +309,47 @@ class McpServer extends Command
         $lines = [];
 
         // Due today / overdue — only human tasks
-        $dueTodayOrOverdue = VaultNote::tickets()
+        $dueTodayOrOverdue = \App\Models\Ticket::query()
             ->whereNotNull('due_date')
             ->where('due_date', '<=', now()->endOfDay())
             ->where('status', '!=', 'done')
             ->where('assigned_to', '!=', 'agent')
             ->orderBy('due_date')
-            ->get(['title', 'due_date', 'priority', 'status']);
+            ->get();
 
         if ($dueTodayOrOverdue->isNotEmpty()) {
             $lines[] = "## Fällig heute / überfällig";
             foreach ($dueTodayOrOverdue as $t) {
                 $overdue = $t->due_date->isPast() ? ' ⚠️ ÜBERFÄLLIG' : '';
-                $lines[] = "- {$t->title} ({$t->priority}, fällig: {$t->due_date->format('d.m. H:i')}){$overdue}";
+                $lines[] = "- {$t->title} ({$t->priority}, fällig: {$t->due_date->format('d.m.')}){$overdue}";
             }
         }
 
         // Open human tasks
-        $openTickets = VaultNote::tickets()
+        $openTickets = \App\Models\Ticket::query()
             ->whereIn('status', ['todo', 'in_progress'])
             ->where('assigned_to', '!=', 'agent')
             ->orderByRaw("CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END")
             ->limit(15)
-            ->get(['title', 'status', 'priority', 'frontmatter']);
+            ->get();
 
         if ($openTickets->isNotEmpty()) {
             $lines[] = "\n## Offene Aufgaben";
             foreach ($openTickets as $t) {
-                $charge = $t->frontmatter['emotional_charge'] ?? 'low';
-                $postponed = $t->frontmatter['postpone_count'] ?? 0;
                 $extra = [];
-                if ($charge === 'high') $extra[] = 'hohe emotionale Ladung';
-                if ($postponed >= 2) $extra[] = "{$postponed}x verschoben";
+                if ($t->emotional_charge === 'high') $extra[] = 'hohe emotionale Ladung';
+                if ($t->postpone_count >= 2) $extra[] = "{$t->postpone_count}x verschoben";
                 $suffix = $extra ? ' (' . implode(', ', $extra) . ')' : '';
                 $lines[] = "- [{$t->status}] {$t->title} ({$t->priority}){$suffix}";
             }
         }
 
         // Agent tickets — separate section, just for info
-        $agentTickets = VaultNote::tickets()
+        $agentTickets = \App\Models\Ticket::query()
             ->whereIn('status', ['ready_for_agent', 'in_progress', 'review'])
             ->where('assigned_to', 'agent')
             ->limit(5)
-            ->get(['title', 'status']);
+            ->get();
 
         if ($agentTickets->isNotEmpty()) {
             $lines[] = "\n## Agent-Aufgaben (Info)";
