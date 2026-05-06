@@ -105,37 +105,116 @@ system_level: 1|2
 
 **Dashboard page**: 6 widget cards with real data, quick action links.
 
+### Phase 1E: Infra — Activity Log + Event Bus + SSE
+**Services** (`app/Services/`):
+- `ActivityLogger.php` — append-only audit trail (actor, action, subject_type/id, details json)
+- `DashboardEventBus.php` — emit() writes to `dashboard_events` table; consumed by SSE
+
+**Controllers**:
+- `EventStreamController.php` — SSE endpoint `/api/events/stream` (long-poll, ID-based cursor)
+
+**Frontend**:
+- `resources/js/hooks/useDashboardEvents.ts` — EventSource hook for live updates
+
+**Tables**: `activity_log`, `dashboard_events`. CSRF-token meta added to `app.blade.php` for non-Inertia POSTs.
+
+### Phase 1F: Agent Loop v2
+**SkillLoader** (`app/Services/Agent/SkillLoader.php`, 271 LOC) — loads skill definitions from `skills/` folder in vault (markdown files with frontmatter), falls back to DB-seeded `agent_skills`. PromptBuilder uses these for system prompt + template.
+
+**Cost tracking**:
+- `CostEvent` model + `cost_events` table (agent_run_id, source, model, input/output/cache tokens, cost_usd, occurred_at)
+- `OutputProcessor` extracts cost from `claude -p --output-format json` response and emits CostEvent
+- `AGENT_MONTHLY_BUDGET_USD` config knob (config('dashboard.agent.monthly_budget_usd'))
+
+**Prompt-builder enhancements**: richer context — wikilinked notes, skill template, ticket frontmatter, related tickets.
+
+### Phase 1G: Kanban v2
+New `KanbanController` endpoints:
+- `GET /api/kanban/ticket/{path}` — show
+- `POST/DELETE /api/kanban/link` — add/remove wikilinks in ticket frontmatter
+- `PATCH /api/kanban/meta` — update priority/due_date/tags/etc.
+- `DELETE /api/kanban/ticket` — delete (vault note + index entry)
+
+`Kanban/Index.tsx` adds a side panel with inline ticket detail editing, link picker, deletion.
+
+### Phase 1H: Daily Check-in + Psychology Engine
+**DailyCheckinService** (`app/Services/Psychology/DailyCheckinService.php`, 528 LOC):
+- Persistent Claude session per day via `--resume <session_id>`
+- Mood detection from user messages (regex + heuristic)
+- Parses Claude responses for `<options>` and `<ticket>` blocks → action buttons / ticket creation
+- Streaming via `runClaudeStreaming()` (SSE infra reused for future Ollama)
+- Writes daily summary as vault note when finished
+
+**Controllers**: `DailyController` (REST), `DailyStreamController` (SSE)
+
+**Tables**: `daily_checkins` (date unique, claude_session_id, messages json, mood, energy, plan, motto_goal, summary, vault_note_path)
+
+**PsychEngine** (`app/Services/Psychology/PsychEngine.php`, 411 LOC):
+- `evaluate(trigger, ticketPath)` — triggers: status_change, task_start, task_complete, dashboard_load, wip_exceeded
+- `getDashboardInsights()` — completion stats (30d), postponement count, avoided high-charge tasks, current WIP, streak
+- Generates `PsychIntervention` records (framework: kahneman/chimp/strudel, intervention_type, content, was_helpful)
+
+**Controller**: `PsychController` — insights, active interventions, feedback (was_helpful), dismiss
+
+**Page**: `Daily/Index.tsx` (588 LOC) — chat UI with mood picker, option buttons, inline ticket creation
+
+**Config**: `daily.model` (default `claude-sonnet-4-6`), `psychology.enabled` env-driven
+
+### Phase 1I: Routines (Cron-Driven Agent Runs)
+**RoutineScheduler** (`app/Services/RoutineScheduler.php`):
+- `checkAndDispatch()` — finds enabled routines where `isDue()` and no active run, dispatches them
+- `dispatch(routine)` — creates kanban ticket (status=ready_for_agent, agent_skill from routine), creates RoutineRun record, updates next_run_at via cron expression
+- `syncRunStatuses()` — links routine_runs to agent_runs by ticket_path, propagates status, emits `routine_completed` event
+
+**Tables**: `routines` (cron_expression, skill, prompt_template, context_links json, model override, output_folder, last_run_at, next_run_at), `routine_runs` (routine_id, agent_run_id, ticket_path, status, summary, output_note_path)
+
+**Command**: `routine:check` — scheduled `everyMinute()` in `routes/console.php`
+
+**Controller**: `RoutineController` — index/store/update/destroy + manual trigger + runs list
+
+**Page**: `Routines/Index.tsx` (331 LOC) — list, create/edit form, recent runs
+
+**Dependency**: `dragonmantank/cron-expression` (via composer)
+
+### Phase 1J: Skills UI + MCP Server + Misc
+**Skills**:
+- Vault folder `skills/` for skill markdown files (frontmatter: name, display_name, description, system_prompt, prompt_template, required_context, enabled)
+- `SkillController` + `Skills/Index.tsx` (277 LOC) — browser/editor
+
+**MCP Server** (`app/Console/Commands/McpServer.php`, 482 LOC):
+- `mcp:serve` command — STDIO MCP transport for Claude Desktop integration
+- Tools exposed: vault read/write/search, kanban create/move, daily checkin context
+
+**DashboardServe** (`app/Console/Commands/DashboardServe.php`):
+- Convenience command to start Laravel server + queue workers + vite dev
+
 ## Additional Database Tables
 - `task_events`: ticket_path, event_type (created|status_changed|postponed|completed|abandoned), from_status, to_status, metadata (json)
 - `settings`: key (unique), value, type (string|integer|boolean|json), group
+- `psych_interventions`: framework, intervention_type, content (json), was_helpful, dismissed_at
+- `daily_checkins`: see Phase 1H above
+- `cost_events`: see Phase 1F above
+- `dashboard_events`: id, type, payload (json), occurred_at — SSE event queue
+- `activity_log`: actor, action, subject_type, subject_id, details (json)
+- `routines`, `routine_runs`: see Phase 1I above
 
 ## Models
 - `VaultNote`, `TaskEvent`, `Setting`, `AgentRun`, `AgentSkill`, `User`
+- `ActivityLog`, `CostEvent`, `DailyCheckin`, `PsychIntervention`, `Routine`, `RoutineRun`
 
 ## Enums
 - `TicketStatus` (6 values), `TicketPriority` (4 values)
 
 ## Route Structure
-```
-GET  /dashboard          → DashboardController@index
-GET  /kanban              → KanbanController@index
-PATCH /api/kanban/move    → KanbanController@move
-POST /api/kanban/tickets  → KanbanController@store
-POST /api/kanban/promote  → KanbanController@promote
-GET  /vault               → VaultController@index
-GET  /vault/note/{path}   → VaultController@show
-POST /vault/notes         → VaultController@store
-PATCH /vault/notes        → VaultController@update
-GET  /api/vault/search    → VaultController@search
-POST /vault/sync          → VaultController@sync
-GET  /agents              → AgentController@index
-GET  /agents/{agentRun}   → AgentController@show
-POST /api/agents/run      → AgentController@triggerRun
-GET  /api/agents/status   → AgentController@status
-GET  /settings            → (placeholder Inertia page)
-```
+Run `php artisan route:list` for the current set. Top-level pages: `/dashboard`, `/daily`, `/kanban`, `/vault`, `/agents`, `/routines`, `/skills`, `/settings`. API namespaces: `/api/kanban/*`, `/api/vault/*`, `/api/agents/*`, `/api/daily/*`, `/api/psych/*`, `/api/routines/*`, `/api/skills/*`, `/api/events/stream`.
 
 ## What's NOT Built Yet
+
+### Settings UI (next up)
+`/settings` is still a placeholder Inertia page. Needs UI for: vault path, agent budget, psychology toggle, daily model, skill folder, queue worker status.
+
+### Tests
+Only Breeze auth scaffolding tests exist. Needs at minimum: KanbanService::moveTicket, VaultManager atomic write, RoutineScheduler::dispatch, PsychEngine triggers.
 
 ### Phase 2: Email Integration
 - `webklex/php-imap` for IMAP
@@ -166,8 +245,18 @@ GET  /settings            → (placeholder Inertia page)
 ## Plan File
 Full detailed plan at: `/root/.claude/plans/sleepy-whistling-swing.md`
 
-## Git Log
+## Git Log (most recent)
 ```
+997bc86 Add skills UI, dashboard widgets, vault folder counts, MCP and serve commands
+71c526a Add routines: cron-driven recurring agent runs
+bdc6544 Add daily check-in chat and psychology engine
+ea078dd Add ticket detail, linking, meta editing, and deletion to kanban
+88831e5 Add skill loader, cost tracking, and prompt-builder context
+67c5ea4 Add activity log, dashboard event bus, and SSE event stream
+8089419 Merge branch 'claude/plan-ai-dashboard-yyImB'
+c4bbdf1 Seeder
+ab15665 Add memory.md — full session context for local continuation
+4ca2d5d Add database factories and seeders from Laravel scaffold
 7dd2bda Phase 1D: Dashboard with live widget data
 71f0349 Phase 1C: Agent loop — autonomous AI execution
 a9fcfc5 Phase 1B: Kanban board with drag-and-drop
