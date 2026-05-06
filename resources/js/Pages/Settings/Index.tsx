@@ -1,6 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, router } from '@inertiajs/react';
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 type Vault = {
     path: string | null;
@@ -34,9 +34,39 @@ type Psychology = {
 
 type Queue = { pending: number; failed: number };
 
-type Props = { vault: Vault; agent: Agent; psychology: Psychology; queue: Queue };
+type DailyCoach = {
+    project_id: string | null;
+    deep_link: string | null;
+    mcp_command: string;
+};
 
-export default function SettingsIndex({ vault, agent, psychology, queue }: Props) {
+type Memory = {
+    id: number;
+    type: string;
+    session_date: string | null;
+    content: string;
+    metadata: Record<string, unknown> | null;
+    created_at: string;
+};
+
+type Embeddings = {
+    voyage_configured: boolean;
+    voyage_model: string;
+    monthly_embedding_cost_usd: number;
+};
+
+type Props = {
+    vault: Vault;
+    agent: Agent;
+    psychology: Psychology;
+    queue: Queue;
+    profile: string;
+    dailyCoach: DailyCoach;
+    memories: Memory[];
+    embeddings: Embeddings;
+};
+
+export default function SettingsIndex({ vault, agent, psychology, queue, profile, dailyCoach, memories, embeddings }: Props) {
     return (
         <AuthenticatedLayout
             header={<h2 className="text-xl font-semibold leading-tight text-gray-200">Settings</h2>}
@@ -44,12 +74,233 @@ export default function SettingsIndex({ vault, agent, psychology, queue }: Props
             <Head title="Settings" />
 
             <div className="space-y-6">
+                <DailyCoachSection coach={dailyCoach} embeddings={embeddings} />
+                <ProfileSection profile={profile} />
+                <CoachMemorySection memories={memories} />
                 <VaultSection vault={vault} />
                 <AgentSection agent={agent} />
                 <PsychologySection psychology={psychology} />
                 <QueueSection queue={queue} />
             </div>
         </AuthenticatedLayout>
+    );
+}
+
+function DailyCoachSection({ coach, embeddings }: { coach: DailyCoach; embeddings: Embeddings }) {
+    const [projectId, setProjectId] = useState(coach.project_id ?? '');
+    const [saving, setSaving] = useState(false);
+    const [copied, setCopied] = useState(false);
+
+    const save = () => {
+        setSaving(true);
+        router.patch(route('settings.daily_coach'), { project_id: projectId || null }, {
+            preserveScroll: true,
+            preserveState: true,
+            onFinish: () => setSaving(false),
+        });
+    };
+
+    const mcpJson = JSON.stringify({
+        mcpServers: {
+            'steffi-dashboard': { command: 'php', args: [`${coach.mcp_command.split(' ').slice(1).join(' ')}`] }
+        }
+    }, null, 2);
+
+    const copy = (txt: string) => {
+        navigator.clipboard.writeText(txt);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+    };
+
+    return (
+        <Card title="Daily Coach (Claude Desktop)" subtitle="Externer Coach via MCP-Server. Daily Check-in läuft im Claude-Desktop-Projekt, Daten landen via MCP-Tools im Dashboard.">
+            <div>
+                <label className="block text-xs font-medium text-gray-400">Claude-Desktop Project-ID</label>
+                <p className="mt-0.5 text-xs text-gray-500">
+                    URL aus Claude Desktop kopieren: <code className="text-gray-400">claude.ai/project/<strong>diese-id</strong></code>
+                </p>
+                <div className="mt-2 flex gap-2">
+                    <input
+                        type="text"
+                        value={projectId}
+                        onChange={(e) => setProjectId(e.target.value)}
+                        placeholder="z.B. abc123-def-456"
+                        className="flex-1 rounded-md border-gray-700 bg-gray-950 text-sm text-gray-200 focus:border-indigo-500 focus:ring-indigo-500"
+                    />
+                    <button
+                        onClick={save}
+                        disabled={saving}
+                        className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                        {saving ? '…' : 'Speichern'}
+                    </button>
+                </div>
+            </div>
+
+            {coach.deep_link && (
+                <div className="mt-4">
+                    <a
+                        href={coach.deep_link}
+                        className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
+                    >
+                        Daily Coach in Claude Desktop öffnen →
+                    </a>
+                </div>
+            )}
+
+            <div className="mt-6">
+                <h4 className="text-xs font-medium text-gray-400">MCP-Setup</h4>
+                <p className="mt-0.5 text-xs text-gray-500">
+                    In <code className="text-gray-400">~/Library/Application Support/Claude/claude_desktop_config.json</code> einfügen, dann Claude Desktop neu starten:
+                </p>
+                <div className="relative mt-2">
+                    <pre className="overflow-x-auto rounded-md bg-gray-950 p-3 text-[11px] text-gray-300 border border-gray-800">{mcpJson}</pre>
+                    <button
+                        onClick={() => copy(mcpJson)}
+                        className="absolute top-2 right-2 rounded bg-gray-800 px-2 py-0.5 text-[10px] text-gray-400 hover:bg-gray-700"
+                    >
+                        {copied ? '✓ kopiert' : 'kopieren'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 text-xs">
+                <div className="rounded-md border border-gray-800 bg-gray-950/50 px-3 py-2">
+                    <span className="text-gray-500">Embeddings: </span>
+                    {embeddings.voyage_configured ? (
+                        <span className="text-emerald-400">{embeddings.voyage_model} ✓</span>
+                    ) : (
+                        <span className="text-red-400">VOYAGE_API_KEY fehlt</span>
+                    )}
+                </div>
+                <div className="rounded-md border border-gray-800 bg-gray-950/50 px-3 py-2">
+                    <span className="text-gray-500">Embedding-Kosten Monat: </span>
+                    <span className="text-gray-300">${embeddings.monthly_embedding_cost_usd.toFixed(6)}</span>
+                </div>
+            </div>
+        </Card>
+    );
+}
+
+function ProfileSection({ profile }: { profile: string }) {
+    const [content, setContent] = useState(profile);
+    const [saving, setSaving] = useState(false);
+    const [savedAt, setSavedAt] = useState<number | null>(null);
+
+    const save = () => {
+        setSaving(true);
+        router.patch(route('settings.profile'), { content }, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => setSavedAt(Date.now()),
+            onFinish: () => setSaving(false),
+        });
+    };
+
+    const dirty = content !== profile;
+
+    return (
+        <Card title="Profil (profile.md)" subtitle="Steffis Stammdaten — vom Coach via get_biography ausgelesen, in storage/app/private/dashboard/profile.md.">
+            <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={14}
+                className="w-full rounded-md border-gray-700 bg-gray-950 font-mono text-xs text-gray-200 focus:border-indigo-500 focus:ring-indigo-500"
+            />
+            <div className="mt-3 flex items-center gap-3">
+                <button
+                    onClick={save}
+                    disabled={saving || !dirty}
+                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                    {saving ? 'Speichere…' : 'Profil speichern'}
+                </button>
+                {dirty && <span className="text-xs text-yellow-400">Ungespeicherte Änderungen</span>}
+                {savedAt && !dirty && <span className="text-xs text-emerald-400">✓ gespeichert</span>}
+            </div>
+        </Card>
+    );
+}
+
+function CoachMemorySection({ memories }: { memories: Memory[] }) {
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState<Memory[]>([]);
+    const [searching, setSearching] = useState(false);
+    const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+    const search = useCallback((q: string) => {
+        if (q.length < 2) { setResults([]); return; }
+        setSearching(true);
+        fetch(route('settings.memories.search') + '?q=' + encodeURIComponent(q), {
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        })
+            .then((r) => r.json())
+            .then((data) => setResults(data))
+            .finally(() => setSearching(false));
+    }, []);
+
+    useEffect(() => {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => search(query), 400);
+        return () => clearTimeout(debounceRef.current);
+    }, [query, search]);
+
+    const remove = (id: number) => {
+        if (!confirm('Memory wirklich löschen?')) return;
+        router.delete(route('settings.memories.destroy', { memory: id }), {
+            preserveScroll: true,
+            preserveState: true,
+        });
+    };
+
+    const list = query.length >= 2 ? results : memories;
+    const isSearching = query.length >= 2;
+
+    return (
+        <Card title="Coach Memory" subtitle={`${memories.length > 0 ? `${memories.length} jüngste Einträge` : 'Noch keine Einträge'} · semantische Suche via pgvector`}>
+            <div className="mb-4">
+                <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Semantisch suchen… (z.B. 'Telefonangst' oder 'Wann war Steffi überfordert')"
+                    className="w-full rounded-md border-gray-700 bg-gray-950 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-indigo-500"
+                />
+                {isSearching && <p className="mt-1 text-[10px] text-gray-500">{searching ? 'Suche…' : `${results.length} Treffer`}</p>}
+            </div>
+
+            <div className="space-y-2">
+                {list.length === 0 ? (
+                    <p className="text-xs text-gray-500">{isSearching ? 'Keine Treffer.' : 'Noch keine Memories. Coach legt sie automatisch an.'}</p>
+                ) : (
+                    list.map((m) => (
+                        <div key={m.id} className="flex items-start justify-between gap-3 rounded-md border border-gray-800 bg-gray-950/50 px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
+                                    <span className={`rounded px-1.5 py-0.5 ${
+                                        m.type === 'pattern' ? 'bg-amber-900/40 text-amber-400' :
+                                        m.type === 'insight' ? 'bg-teal-900/40 text-teal-400' :
+                                        m.type === 'session' ? 'bg-gray-800 text-gray-400' :
+                                        'bg-purple-900/40 text-purple-400'
+                                    }`}>{m.type}</span>
+                                    {m.session_date && <span className="text-gray-600">{m.session_date}</span>}
+                                </div>
+                                <p className="mt-1 text-sm text-gray-300 break-words">{m.content}</p>
+                            </div>
+                            <button
+                                onClick={() => remove(m.id)}
+                                className="text-gray-600 hover:text-red-400 flex-shrink-0"
+                                title="Löschen"
+                            >
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    ))
+                )}
+            </div>
+        </Card>
     );
 }
 

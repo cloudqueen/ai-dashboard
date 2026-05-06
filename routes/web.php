@@ -80,6 +80,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/api/settings/{key}', [SettingsController::class, 'update'])->where('key', '[a-z._]+')->name('settings.update');
     Route::post('/api/settings/sync-now', [SettingsController::class, 'syncNow'])->name('settings.sync_now');
     Route::post('/api/settings/retry-failed', [SettingsController::class, 'retryFailedJobs'])->name('settings.retry_failed');
+    Route::patch('/api/settings/profile', [SettingsController::class, 'updateProfile'])->name('settings.profile');
+    Route::patch('/api/settings/daily-coach', [SettingsController::class, 'updateDailyCoachProjectId'])->name('settings.daily_coach');
+    Route::get('/api/settings/memories/search', [SettingsController::class, 'searchMemories'])->name('settings.memories.search');
+    Route::delete('/api/settings/memories/{memory}', [SettingsController::class, 'deleteMemory'])->name('settings.memories.destroy');
 });
 
 Route::middleware('auth')->group(function () {

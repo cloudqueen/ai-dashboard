@@ -3,14 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\AgentRun;
+use App\Models\CoachMemory;
 use App\Models\CostEvent;
 use App\Models\VaultNote;
+use App\Services\CoachMemoryService;
 use App\Services\SettingsService;
 use App\Services\Vault\VaultManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class SettingsController extends Controller
@@ -58,6 +59,27 @@ class SettingsController extends Controller
                 'pending' => DB::table('jobs')->count(),
                 'failed' => DB::table('failed_jobs')->count(),
             ],
+            'profile' => $settings->getProfile(),
+            'dailyCoach' => [
+                'project_id' => $settings->dailyCoachProjectId(),
+                'deep_link' => $settings->dailyCoachProjectId()
+                    ? 'claude://claude.ai/project/' . $settings->dailyCoachProjectId()
+                    : null,
+                'mcp_command' => 'php ' . base_path('artisan') . ' mcp:serve',
+            ],
+            'memories' => CoachMemory::query()
+                ->orderByDesc('created_at')
+                ->limit(20)
+                ->get(['id', 'type', 'session_date', 'content', 'metadata', 'created_at'])
+                ->toArray(),
+            'embeddings' => [
+                'voyage_configured' => (bool) config('dashboard.embeddings.voyage_api_key'),
+                'voyage_model' => config('dashboard.embeddings.voyage_model'),
+                'monthly_embedding_cost_usd' => round((float) CostEvent::whereYear('occurred_at', now()->year)
+                    ->whereMonth('occurred_at', now()->month)
+                    ->where('source', 'embedding')
+                    ->sum('cost_usd'), 6),
+            ],
         ]);
     }
 
@@ -96,6 +118,48 @@ class SettingsController extends Controller
     {
         Artisan::call('queue:retry', ['id' => ['all']]);
 
+        return back();
+    }
+
+    public function updateProfile(Request $request, SettingsService $settings)
+    {
+        $data = $request->validate(['content' => 'required|string|max:50000']);
+        $settings->setProfile($data['content']);
+
+        return back()->with('success', 'Profil gespeichert.');
+    }
+
+    public function updateDailyCoachProjectId(Request $request, SettingsService $settings)
+    {
+        $data = $request->validate(['project_id' => 'nullable|string|max:200']);
+        $settings->setDailyCoachProjectId($data['project_id'] ?? null);
+
+        return back()->with('success', 'Project-ID gespeichert.');
+    }
+
+    public function searchMemories(Request $request, CoachMemoryService $memories)
+    {
+        $q = trim((string) $request->input('q', ''));
+        $limit = (int) $request->input('limit', 5);
+
+        if ($q === '') {
+            return response()->json([]);
+        }
+
+        return response()->json(
+            $memories->recall($q, $limit)
+                ->map(fn ($m) => [
+                    'id' => $m->id,
+                    'type' => $m->type,
+                    'session_date' => $m->session_date?->toDateString(),
+                    'content' => $m->content,
+                ])
+        );
+    }
+
+    public function deleteMemory(CoachMemory $memory)
+    {
+        $memory->delete();
         return back();
     }
 }

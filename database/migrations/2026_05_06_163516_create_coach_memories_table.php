@@ -20,7 +20,7 @@ return new class extends Migration
 
         $dims = (int) config('dashboard.embeddings.dims', 512);
         DB::statement("ALTER TABLE coach_memories ADD COLUMN embedding vector({$dims})");
-        DB::statement('CREATE INDEX coach_memories_embedding_cosine_idx ON coach_memories USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10)');
+        DB::statement('CREATE INDEX coach_memories_embedding_hnsw_idx ON coach_memories USING hnsw (embedding vector_cosine_ops)');
     }
 
     public function down(): void

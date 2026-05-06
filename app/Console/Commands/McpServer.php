@@ -209,12 +209,72 @@ class McpServer extends Command
         ];
 
         $this->tools['get_biography'] = [
-            'description' => 'Gibt Steffis Biografie zurück (Stefanie.md). Nutze dies für Kontext in Coaching-Gesprächen.',
+            'description' => 'Gibt Steffis Profil zurück (Stammdaten, Vorlieben, Kontext). Nutze dies am Anfang eines Coaching-Gesprächs.',
             'schema' => [
                 'type' => 'object',
                 'properties' => new \stdClass(),
             ],
             'handler' => fn (array $args) => $this->toolGetBiography($args),
+        ];
+
+        $this->tools['recall_coach_memory'] = [
+            'description' => 'Semantische Suche im Coach-Memory: gibt frühere Beobachtungen, Muster und Insights zurück, die zur Anfrage passen.',
+            'schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'query' => ['type' => 'string', 'description' => 'Was du suchen willst, in natürlicher Sprache'],
+                    'limit' => ['type' => 'integer', 'default' => 5],
+                ],
+                'required' => ['query'],
+            ],
+            'handler' => fn (array $args) => $this->toolRecallMemory($args),
+        ];
+
+        $this->tools['store_coach_memory'] = [
+            'description' => 'Speichert eine Beobachtung, Muster oder Insight als Coach-Memory. Nutze dies während/nach Sessions, um Erkenntnisse über Steffi festzuhalten.',
+            'schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'content' => ['type' => 'string', 'description' => 'Die Beobachtung in deinen eigenen Worten'],
+                    'type' => ['type' => 'string', 'enum' => ['session', 'insight', 'pattern', 'consolidation'], 'default' => 'insight'],
+                    'metadata' => ['type' => 'object', 'description' => 'Optional: relevante IDs, mood, etc.'],
+                ],
+                'required' => ['content'],
+            ],
+            'handler' => fn (array $args) => $this->toolStoreMemory($args),
+        ];
+
+        $this->tools['list_recent_memories'] = [
+            'description' => 'Listet die N letzten Coach-Memories chronologisch.',
+            'schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'limit' => ['type' => 'integer', 'default' => 20],
+                ],
+            ],
+            'handler' => fn (array $args) => $this->toolListMemories($args),
+        ];
+
+        $this->tools['get_recent_checkins'] = [
+            'description' => 'Gibt die letzten Daily-Checkins zurück (Mood, Energy, Plan, Summary). Nutze dies für Continuity zwischen Sessions.',
+            'schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'days' => ['type' => 'integer', 'default' => 7, 'description' => 'Wie weit zurück (in Tagen)'],
+                ],
+            ],
+            'handler' => fn (array $args) => $this->toolRecentCheckins($args),
+        ];
+
+        $this->tools['get_psych_trends'] = [
+            'description' => 'Gibt psychologische Trends zurück: Mood/Energy Verlauf, Completion-Rate, Postpone-Muster, WIP-Schnitt, "stuck" Tickets.',
+            'schema' => [
+                'type' => 'object',
+                'properties' => [
+                    'days' => ['type' => 'integer', 'default' => 30],
+                ],
+            ],
+            'handler' => fn (array $args) => $this->toolPsychTrends($args),
         ];
     }
 
@@ -411,10 +471,107 @@ class McpServer extends Command
 
     private function toolGetBiography(array $args): string
     {
-        $vault = app(VaultManager::class);
-        $note = $vault->readNote('Stefanie.md');
+        $profile = app(\App\Services\SettingsService::class)->getProfile();
+        return $profile !== '' ? $profile : 'Profil ist leer (in den Dashboard-Settings befüllen).';
+    }
 
-        return $note ? $note->body : 'Biografie nicht gefunden (Stefanie.md im Vault-Root)';
+    private function toolRecallMemory(array $args): array
+    {
+        $svc = app(\App\Services\CoachMemoryService::class);
+        $memories = $svc->recall($args['query'], $args['limit'] ?? 5);
+
+        return $memories->map(fn ($m) => [
+            'id' => $m->id,
+            'type' => $m->type,
+            'date' => $m->session_date?->toDateString(),
+            'content' => $m->content,
+            'metadata' => $m->metadata,
+        ])->all();
+    }
+
+    private function toolStoreMemory(array $args): string
+    {
+        $svc = app(\App\Services\CoachMemoryService::class);
+        $m = $svc->store(
+            $args['content'],
+            $args['type'] ?? 'insight',
+            $args['metadata'] ?? null,
+        );
+
+        return "Memory gespeichert (#{$m->id}, type={$m->type})";
+    }
+
+    private function toolListMemories(array $args): array
+    {
+        $svc = app(\App\Services\CoachMemoryService::class);
+        return $svc->listRecent($args['limit'] ?? 20)
+            ->map(fn ($m) => [
+                'id' => $m->id,
+                'type' => $m->type,
+                'date' => $m->session_date?->toDateString(),
+                'content' => $m->content,
+            ])->all();
+    }
+
+    private function toolRecentCheckins(array $args): array
+    {
+        $days = $args['days'] ?? 7;
+
+        return DailyCheckin::query()
+            ->whereNotNull('completed_at')
+            ->where('date', '>=', now()->subDays($days)->toDateString())
+            ->orderByDesc('date')
+            ->get(['date', 'mood', 'energy', 'motto_goal', 'plan', 'summary'])
+            ->map(fn ($c) => [
+                'date' => $c->date->toDateString(),
+                'mood' => $c->mood,
+                'energy' => $c->energy,
+                'motto_goal' => $c->motto_goal,
+                'plan' => $c->plan,
+                'summary' => $c->summary,
+            ])->all();
+    }
+
+    private function toolPsychTrends(array $args): array
+    {
+        $days = $args['days'] ?? 30;
+        $since = now()->subDays($days);
+
+        $checkins = DailyCheckin::query()
+            ->whereNotNull('completed_at')
+            ->where('date', '>=', $since->toDateString())
+            ->orderBy('date')
+            ->get(['date', 'mood', 'energy']);
+
+        $completed = \App\Models\TaskEvent::where('event_type', 'status_changed')
+            ->where('to_status', 'done')
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        $postponements = \App\Models\TaskEvent::where('event_type', 'postponed')
+            ->where('created_at', '>=', $since)
+            ->count();
+
+        $stuckTickets = \App\Models\Ticket::where('postpone_count', '>=', 2)
+            ->whereNotIn('status', ['done'])
+            ->orderByDesc('postpone_count')
+            ->limit(10)
+            ->get(['id', 'title', 'status', 'postpone_count', 'emotional_charge']);
+
+        $avgWip = \App\Models\Ticket::whereIn('status', ['in_progress', 'ready_for_agent'])->count();
+
+        return [
+            'window_days' => $days,
+            'mood_energy' => $checkins->map(fn ($c) => [
+                'date' => $c->date->toDateString(),
+                'mood' => $c->mood,
+                'energy' => $c->energy,
+            ])->all(),
+            'tickets_completed' => $completed,
+            'postponements' => $postponements,
+            'current_wip' => $avgWip,
+            'stuck_tickets' => $stuckTickets->toArray(),
+        ];
     }
 
     // --- JSON-RPC helpers ---

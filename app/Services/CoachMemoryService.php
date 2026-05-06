@@ -34,7 +34,7 @@ class CoachMemoryService
         $queryVector = new Vector($this->embeddings->embed($query, 'query'));
 
         return CoachMemory::query()
-            ->orderByRaw('embedding <=> ?', [(string) $queryVector])
+            ->orderByRaw('embedding <=> ?::vector', [(string) $queryVector])
             ->limit($limit)
             ->get();
     }

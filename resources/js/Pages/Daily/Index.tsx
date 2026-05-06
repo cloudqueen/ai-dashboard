@@ -31,8 +31,25 @@ interface Checkin {
     completed_at: string | null;
 }
 
+interface HistoryItem {
+    id: number;
+    date: string;
+    mood: string | null;
+    energy: number | null;
+    motto_goal: string | null;
+    summary: string | null;
+    completed_at: string | null;
+}
+
+interface DailyCoach {
+    project_id: string | null;
+    deep_link: string | null;
+}
+
 interface Props {
     checkin: Checkin;
+    history: HistoryItem[];
+    dailyCoach: DailyCoach;
 }
 
 const MOODS = [
@@ -57,7 +74,8 @@ function getQuickReplies(checkin: Checkin): string[] {
     return [];
 }
 
-export default function DailyIndex({ checkin: initialCheckin }: Props) {
+export default function DailyIndex({ checkin: initialCheckin, history, dailyCoach }: Props) {
+    const [showFallback, setShowFallback] = useState(!dailyCoach.deep_link);
     const [checkin, setCheckin] = useState(initialCheckin);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
@@ -269,7 +287,42 @@ export default function DailyIndex({ checkin: initialCheckin }: Props) {
         >
             <Head title="Daily Check-in" />
 
-            <div className="mx-auto flex h-[calc(100vh-10rem)] max-w-3xl flex-col">
+            <div className="mx-auto max-w-3xl space-y-4">
+                {/* Daily Coach (Claude Desktop) */}
+                {dailyCoach.deep_link ? (
+                    <div className="rounded-xl border border-purple-800/50 bg-purple-900/10 p-5">
+                        <div className="flex items-center justify-between gap-4">
+                            <div>
+                                <h3 className="text-sm font-medium text-purple-300">Daily Coach in Claude Desktop</h3>
+                                <p className="mt-1 text-xs text-gray-400">
+                                    Empfohlen — der Coach kennt dein Profil, alle Trends und Memories. Speichert automatisch ins Dashboard.
+                                </p>
+                            </div>
+                            <a
+                                href={dailyCoach.deep_link}
+                                className="flex-shrink-0 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500"
+                            >
+                                Coach öffnen →
+                            </a>
+                        </div>
+                        {!isCompleted && (
+                            <button
+                                onClick={() => setShowFallback((s) => !s)}
+                                className="mt-3 text-[11px] text-gray-500 hover:text-gray-300"
+                            >
+                                {showFallback ? '↑ Lokalen Chat ausblenden' : '↓ Stattdessen lokalen Chat (Fallback)'}
+                            </button>
+                        )}
+                    </div>
+                ) : (
+                    <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 text-xs text-gray-500">
+                        Tipp: Konfiguriere die Claude-Desktop Project-ID in den <a href={route('settings')} className="text-indigo-400 hover:text-indigo-300">Settings</a>, um den externen Coach zu nutzen.
+                    </div>
+                )}
+            </div>
+
+            {(showFallback || isCompleted) && (
+            <div className="mx-auto mt-6 flex h-[calc(100vh-22rem)] max-w-3xl flex-col">
                 {/* Motto goal banner */}
                 {checkin.motto_goal && (
                     <div className="mb-4 rounded-xl border border-teal-800/50 bg-teal-900/10 px-4 py-3 text-center">
@@ -439,6 +492,32 @@ export default function DailyIndex({ checkin: initialCheckin }: Props) {
                     </div>
                 )}
             </div>
+            )}
+
+            {history.length > 0 && (
+                <div className="mx-auto mt-8 max-w-3xl">
+                    <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-gray-500">Historie (letzte 14)</h3>
+                    <div className="space-y-2">
+                        {history.map((h) => (
+                            <div key={h.id} className="rounded-md border border-gray-800 bg-gray-900 px-4 py-2">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="text-gray-300">{new Date(h.date).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                                    <div className="flex items-center gap-2">
+                                        {h.mood && (
+                                            <span className="text-gray-500">
+                                                {MOODS.find((m) => m.value === h.mood)?.emoji ?? ''} {MOODS.find((m) => m.value === h.mood)?.label ?? h.mood}
+                                            </span>
+                                        )}
+                                        {h.energy && <span className="text-gray-500">⚡{h.energy}/5</span>}
+                                    </div>
+                                </div>
+                                {h.motto_goal && <p className="mt-1 text-xs italic text-teal-400/80">„{h.motto_goal}"</p>}
+                                {h.summary && <p className="mt-1 text-xs text-gray-400 line-clamp-2">{h.summary}</p>}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </AuthenticatedLayout>
     );
 }

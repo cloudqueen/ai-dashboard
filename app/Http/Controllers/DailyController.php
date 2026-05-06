@@ -4,18 +4,32 @@ namespace App\Http\Controllers;
 
 use App\Models\DailyCheckin;
 use App\Services\Psychology\DailyCheckinService;
+use App\Services\SettingsService;
 use App\Services\TicketService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class DailyController extends Controller
 {
-    public function index(DailyCheckinService $service)
+    public function index(DailyCheckinService $service, SettingsService $settings)
     {
         $checkin = $service->getOrCreateToday();
+        $projectId = $settings->dailyCoachProjectId();
+
+        $history = DailyCheckin::query()
+            ->whereNotNull('completed_at')
+            ->where('id', '!=', $checkin->id)
+            ->orderByDesc('date')
+            ->limit(14)
+            ->get(['id', 'date', 'mood', 'energy', 'motto_goal', 'summary', 'completed_at']);
 
         return Inertia::render('Daily/Index', [
             'checkin' => $checkin,
+            'history' => $history,
+            'dailyCoach' => [
+                'project_id' => $projectId,
+                'deep_link' => $projectId ? 'claude://claude.ai/project/' . $projectId : null,
+            ],
         ]);
     }
 
