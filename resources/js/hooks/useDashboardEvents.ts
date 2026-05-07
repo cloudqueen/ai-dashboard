@@ -28,7 +28,7 @@ export function useDashboardEvents(onEvent?: (event: DashboardEvent) => void) {
                 onEvent?.(event);
 
                 // Refresh Inertia page data
-                router.reload({ preserveScroll: true, preserveState: true });
+                router.reload();
             } catch { /* ignore malformed */ }
         };
 

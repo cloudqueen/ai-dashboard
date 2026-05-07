@@ -226,8 +226,8 @@ export default function Dashboard({ vaultConfigured, kanbanSummary, dueSoon, age
                                                 {String(e.entity_id).replace(/\.md$/, '').split('/').pop()}
                                             </span>
                                         )}
-                                        {e.details?.to && (
-                                            <span className="text-gray-600"> → {String(e.details.to)}</span>
+                                        {e.details && typeof e.details === 'object' && 'to' in e.details && (
+                                            <span className="text-gray-600"> → {String((e.details as Record<string, unknown>).to)}</span>
                                         )}
                                     </div>
                                 </div>
