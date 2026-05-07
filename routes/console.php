@@ -13,3 +13,6 @@ Schedule::command('agent:heartbeat')->everyThreeMinutes();
 
 // Routine check - dispatch due recurring tasks
 Schedule::command('routine:check')->everyMinute();
+
+// Nightly project runs (sequential, claude code per active project)
+Schedule::command('projects:nightly')->dailyAt('02:00')->withoutOverlapping();

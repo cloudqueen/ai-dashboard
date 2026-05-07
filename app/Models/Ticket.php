@@ -25,6 +25,7 @@ class Ticket extends Model
         'depends_on',
         'model',
         'routine_id',
+        'project_id',
         'source_vault_note_id',
         'completed_at',
     ];
@@ -45,6 +46,11 @@ class Ticket extends Model
     public function routine(): BelongsTo
     {
         return $this->belongsTo(Routine::class);
+    }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class);
     }
 
     public function sourceVaultNote(): BelongsTo

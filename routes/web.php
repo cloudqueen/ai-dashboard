@@ -7,6 +7,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventStreamController;
 use App\Http\Controllers\KanbanController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\PsychController;
 use App\Http\Controllers\RoutineController;
 use App\Http\Controllers\SettingsController;
@@ -70,6 +71,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/routines/{routine}', [RoutineController::class, 'destroy'])->name('routines.destroy');
     Route::post('/routines/{routine}/trigger', [RoutineController::class, 'trigger'])->name('routines.trigger');
     Route::get('/api/routines/{routine}/runs', [RoutineController::class, 'runs'])->name('routines.runs');
+
+    Route::get('/projects', [ProjectController::class, 'index'])->name('projects');
+    Route::post('/projects', [ProjectController::class, 'store'])->name('projects.store');
+    Route::get('/projects/{project}', [ProjectController::class, 'show'])->name('projects.show');
+    Route::patch('/projects/{project}', [ProjectController::class, 'update'])->name('projects.update');
+    Route::delete('/projects/{project}', [ProjectController::class, 'destroy'])->name('projects.destroy');
+    Route::patch('/projects/{project}/nightly', [ProjectController::class, 'updateNightly'])->name('projects.nightly');
+    Route::post('/projects/{project}/run', [ProjectController::class, 'runNow'])->name('projects.run');
 
     Route::get('/skills', [SkillController::class, 'index'])->name('skills');
     Route::post('/skills', [SkillController::class, 'store'])->name('skills.store');
