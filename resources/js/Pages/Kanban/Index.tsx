@@ -208,8 +208,7 @@ export default function KanbanIndex({ columns, filterOptions }: Props) {
                                             const col = localColumns[statusKey];
                                             if (!col) return null;
                                             if (!lanesStatuses.includes(statusKey)) {
-                                                // Keep alignment with the other lane via an invisible spacer
-                                                return <div key={`${statusKey}-${lane}-spacer`} className="w-72 flex-shrink-0" aria-hidden="true" />;
+                                                return null;
                                             }
                                             const laneTickets = filterTickets(col.tickets, lane, filters);
                                             return (
