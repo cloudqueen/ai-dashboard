@@ -61,6 +61,13 @@ interface Props {
     filters: Record<string, string>;
 }
 
+type Lane = 'human' | 'agent';
+type LaneFilters = { priority: string; tags: string[] };
+const emptyFilters: LaneFilters = { priority: 'all', tags: [] };
+
+const LANES: Lane[] = ['human', 'agent'];
+const LANE_LABELS: Record<Lane, string> = { human: 'Du', agent: 'Agent' };
+
 const priorityColors: Record<string, string> = {
     critical: 'border-l-red-500',
     high: 'border-l-orange-500',
@@ -78,11 +85,13 @@ function formatDateDe(dateStr: string): string {
     } catch { return dateStr; }
 }
 
-export default function KanbanIndex({ columns }: Props) {
+export default function KanbanIndex({ columns, filterOptions }: Props) {
     const [localColumns, setLocalColumns] = useState(columns);
     const [showNewTicket, setShowNewTicket] = useState(false);
     const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
     const [interventionToast, setInterventionToast] = useState<{ id: number; framework: string; intervention_type: string; content: string } | null>(null);
+    const [humanFilters, setHumanFilters] = useState<LaneFilters>(emptyFilters);
+    const [agentFilters, setAgentFilters] = useState<LaneFilters>(emptyFilters);
     const flash = usePage().props.flash as Record<string, unknown> | undefined;
 
     useEffect(() => {
@@ -95,45 +104,59 @@ export default function KanbanIndex({ columns }: Props) {
         }
     }, [flash]);
 
+    const parseDroppable = (id: string): { status: string; lane: Lane } => {
+        const idx = id.lastIndexOf('-');
+        return { status: id.slice(0, idx), lane: id.slice(idx + 1) as Lane };
+    };
+
     const handleDragEnd = (result: DropResult) => {
         const { source, destination, draggableId } = result;
+        if (!destination) return;
+        if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
-        if (!destination || (source.droppableId === destination.droppableId && source.index === destination.index)) {
-            return;
+        const dest = parseDroppable(destination.droppableId);
+
+        // Find and remove ticket from its current status column (by id, since lane is rendering-only)
+        const updated = { ...localColumns };
+        let movedTicket: Ticket | null = null;
+        for (const statusKey of Object.keys(updated)) {
+            const col = updated[statusKey];
+            const idx = col.tickets.findIndex((t) => String(t.id) === draggableId);
+            if (idx >= 0) {
+                const tickets = [...col.tickets];
+                [movedTicket] = tickets.splice(idx, 1);
+                updated[statusKey] = { ...col, tickets };
+                break;
+            }
         }
+        if (!movedTicket) return;
 
-        const newColumns = { ...localColumns };
-        const sourceCol = { ...newColumns[source.droppableId] };
-        const destCol = source.droppableId === destination.droppableId
-            ? sourceCol
-            : { ...newColumns[destination.droppableId] };
+        movedTicket = { ...movedTicket, status: dest.status, assigned_to: dest.lane };
+        const destCol = updated[dest.status];
+        updated[dest.status] = { ...destCol, tickets: [...destCol.tickets, movedTicket] };
 
-        const sourceTickets = [...sourceCol.tickets];
-        const [movedTicket] = sourceTickets.splice(source.index, 1);
-        movedTicket.status = destination.droppableId;
-
-        if (source.droppableId === destination.droppableId) {
-            sourceTickets.splice(destination.index, 0, movedTicket);
-            sourceCol.tickets = sourceTickets;
-            newColumns[source.droppableId] = sourceCol;
-        } else {
-            const destTickets = [...destCol.tickets];
-            destTickets.splice(destination.index, 0, movedTicket);
-            sourceCol.tickets = sourceTickets;
-            destCol.tickets = destTickets;
-            newColumns[source.droppableId] = sourceCol;
-            newColumns[destination.droppableId] = destCol;
-        }
-
-        setLocalColumns(newColumns);
+        setLocalColumns(updated);
 
         router.patch(route('kanban.move'), {
             id: Number(draggableId),
-            status: destination.droppableId,
+            status: dest.status,
+            assigned_to: dest.lane,
         }, {
             preserveState: true,
             preserveScroll: true,
             onError: () => setLocalColumns(columns),
+        });
+    };
+
+    const filterTickets = (tickets: Ticket[], lane: Lane, f: LaneFilters): Ticket[] => {
+        return tickets.filter((t) => {
+            if (t.assigned_to !== lane) return false;
+            if (f.priority !== 'all' && t.priority !== f.priority) return false;
+            if (f.tags.length > 0) {
+                const tt = t.tags ?? [];
+                if (!f.tags.every((tag) => tt.includes(tag))) return false;
+            }
+            return true;
         });
     };
 
@@ -158,18 +181,44 @@ export default function KanbanIndex({ columns }: Props) {
             )}
 
             <DragDropContext onDragEnd={handleDragEnd}>
-                <div className="flex gap-4 overflow-x-auto pb-4">
-                    {statusOrder.map((statusKey) => {
-                        const col = localColumns[statusKey];
-                        if (!col) return null;
-                        return (
-                            <KanbanColumn
-                                key={statusKey}
-                                column={col}
-                                onCardClick={setSelectedTicket}
-                            />
-                        );
-                    })}
+                <div className="overflow-x-auto pb-4">
+                    <div className="min-w-fit space-y-6">
+                        {LANES.map((lane) => {
+                            const filters = lane === 'human' ? humanFilters : agentFilters;
+                            const setFilters = lane === 'human' ? setHumanFilters : setAgentFilters;
+                            const totalCount = statusOrder.reduce(
+                                (sum, s) => sum + filterTickets(localColumns[s]?.tickets ?? [], lane, filters).length,
+                                0
+                            );
+                            return (
+                                <div key={lane}>
+                                    <LaneHeader
+                                        lane={lane}
+                                        count={totalCount}
+                                        filters={filters}
+                                        setFilters={setFilters}
+                                        availableTags={filterOptions.tags}
+                                    />
+                                    <div className="flex gap-4">
+                                        {statusOrder.map((statusKey) => {
+                                            const col = localColumns[statusKey];
+                                            if (!col) return null;
+                                            const laneTickets = filterTickets(col.tickets, lane, filters);
+                                            return (
+                                                <KanbanColumn
+                                                    key={`${statusKey}-${lane}`}
+                                                    column={col}
+                                                    lane={lane}
+                                                    laneTickets={laneTickets}
+                                                    onCardClick={setSelectedTicket}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
             </DragDropContext>
 
@@ -236,25 +285,30 @@ export default function KanbanIndex({ columns }: Props) {
     );
 }
 
-function KanbanColumn({ column, onCardClick }: { column: Column; onCardClick: (t: Ticket) => void }) {
+function KanbanColumn({ column, lane, laneTickets, onCardClick }: {
+    column: Column;
+    lane: Lane;
+    laneTickets: Ticket[];
+    onCardClick: (t: Ticket) => void;
+}) {
     return (
         <div className="flex w-72 flex-shrink-0 flex-col rounded-xl border border-gray-800 bg-gray-900">
             <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
                 <h3 className="text-sm font-medium text-gray-300">{column.label}</h3>
                 <span className="rounded-full bg-gray-800 px-2 py-0.5 text-xs text-gray-500">
-                    {column.tickets.length}
+                    {laneTickets.length}
                 </span>
             </div>
-            <Droppable droppableId={column.key}>
+            <Droppable droppableId={`${column.key}-${lane}`}>
                 {(provided, snapshot) => (
                     <div
                         ref={provided.innerRef}
                         {...provided.droppableProps}
-                        className={`min-h-[100px] flex-1 space-y-2 p-3 transition-colors ${
+                        className={`min-h-[80px] flex-1 space-y-2 p-3 transition-colors ${
                             snapshot.isDraggingOver ? 'bg-gray-800/30' : ''
                         }`}
                     >
-                        {column.tickets.map((ticket, index) => (
+                        {laneTickets.map((ticket, index) => (
                             <KanbanCard
                                 key={ticket.id}
                                 ticket={ticket}
@@ -263,12 +317,89 @@ function KanbanColumn({ column, onCardClick }: { column: Column; onCardClick: (t
                             />
                         ))}
                         {provided.placeholder}
-                        {column.tickets.length === 0 && !snapshot.isDraggingOver && (
-                            <p className="py-6 text-center text-xs text-gray-600">No tickets</p>
+                        {laneTickets.length === 0 && !snapshot.isDraggingOver && (
+                            <p className="py-4 text-center text-[10px] text-gray-700">—</p>
                         )}
                     </div>
                 )}
             </Droppable>
+        </div>
+    );
+}
+
+function LaneHeader({ lane, count, filters, setFilters, availableTags }: {
+    lane: Lane;
+    count: number;
+    filters: LaneFilters;
+    setFilters: (f: LaneFilters) => void;
+    availableTags: string[];
+}) {
+    const isHuman = lane === 'human';
+    const accent = isHuman ? 'border-indigo-700/40 bg-indigo-900/10' : 'border-purple-800/40 bg-purple-900/10';
+    const label = isHuman ? 'text-indigo-300' : 'text-purple-300';
+
+    const toggleTag = (tag: string) => {
+        const next = filters.tags.includes(tag)
+            ? filters.tags.filter((t) => t !== tag)
+            : [...filters.tags, tag];
+        setFilters({ ...filters, tags: next });
+    };
+
+    const clear = () => setFilters(emptyFilters);
+    const hasFilters = filters.priority !== 'all' || filters.tags.length > 0;
+
+    return (
+        <div className={`mb-3 flex flex-wrap items-center gap-3 rounded-lg border ${accent} px-3 py-2`}>
+            <span className={`text-xs font-medium uppercase tracking-wider ${label}`}>
+                {LANE_LABELS[lane]}
+            </span>
+            <span className="text-[10px] text-gray-500">{count} {count === 1 ? 'Ticket' : 'Tickets'}</span>
+
+            <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-600">Prio:</span>
+                <select
+                    value={filters.priority}
+                    onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
+                    className="rounded border-gray-700 bg-gray-950 py-0.5 pl-2 pr-7 text-[10px] text-gray-300 focus:border-indigo-500 focus:ring-0"
+                >
+                    <option value="all">alle</option>
+                    <option value="critical">critical</option>
+                    <option value="high">high</option>
+                    <option value="medium">medium</option>
+                    <option value="low">low</option>
+                </select>
+            </div>
+
+            {availableTags.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] text-gray-600">Tags:</span>
+                    {availableTags.slice(0, 12).map((tag) => {
+                        const active = filters.tags.includes(tag);
+                        return (
+                            <button
+                                key={tag}
+                                onClick={() => toggleTag(tag)}
+                                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                                    active
+                                        ? 'bg-indigo-600 text-white'
+                                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                                }`}
+                            >
+                                {active ? '×' : '+'} {tag}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
+            {hasFilters && (
+                <button
+                    onClick={clear}
+                    className="ml-auto text-[10px] text-gray-500 hover:text-gray-300"
+                >
+                    Reset
+                </button>
+            )}
         </div>
     );
 }

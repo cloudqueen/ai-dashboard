@@ -27,9 +27,17 @@ class KanbanController extends Controller
         $request->validate([
             'id' => 'required|integer|exists:tickets,id',
             'status' => 'required|string',
+            'assigned_to' => 'nullable|in:human,agent',
         ]);
 
         $ticket = Ticket::findOrFail($request->integer('id'));
+
+        if ($newAssignee = $request->input('assigned_to')) {
+            if ($ticket->assigned_to !== $newAssignee) {
+                $ticket->update(['assigned_to' => $newAssignee]);
+            }
+        }
+
         $result = $tickets->move($ticket, $request->input('status'));
 
         $flash = ['success' => 'Ticket moved.'];
