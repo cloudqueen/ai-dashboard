@@ -77,6 +77,9 @@ const priorityColors: Record<string, string> = {
 
 const statusOrder = ['backlog', 'todo', 'ready_for_agent', 'in_progress', 'review', 'done'];
 
+const statusForLane = (lane: Lane): string[] =>
+    lane === 'human' ? statusOrder.filter((s) => s !== 'ready_for_agent') : statusOrder;
+
 function formatDateDe(dateStr: string): string {
     try {
         const d = new Date(dateStr);
@@ -186,7 +189,8 @@ export default function KanbanIndex({ columns, filterOptions }: Props) {
                         {LANES.map((lane) => {
                             const filters = lane === 'human' ? humanFilters : agentFilters;
                             const setFilters = lane === 'human' ? setHumanFilters : setAgentFilters;
-                            const totalCount = statusOrder.reduce(
+                            const lanesStatuses = statusForLane(lane);
+                            const totalCount = lanesStatuses.reduce(
                                 (sum, s) => sum + filterTickets(localColumns[s]?.tickets ?? [], lane, filters).length,
                                 0
                             );
@@ -203,6 +207,10 @@ export default function KanbanIndex({ columns, filterOptions }: Props) {
                                         {statusOrder.map((statusKey) => {
                                             const col = localColumns[statusKey];
                                             if (!col) return null;
+                                            if (!lanesStatuses.includes(statusKey)) {
+                                                // Keep alignment with the other lane via an invisible spacer
+                                                return <div key={`${statusKey}-${lane}-spacer`} className="w-72 flex-shrink-0" aria-hidden="true" />;
+                                            }
                                             const laneTickets = filterTickets(col.tickets, lane, filters);
                                             return (
                                                 <KanbanColumn
@@ -996,7 +1004,12 @@ function NewTicketForm({ onClose }: { onClose: () => void }) {
                 </select>
                 <select
                     value={data.assigned_to}
-                    onChange={(e) => setData('assigned_to', e.target.value)}
+                    onChange={(e) => {
+                        setData('assigned_to', e.target.value);
+                        if (e.target.value === 'human' && data.status === 'ready_for_agent') {
+                            setData('status', 'todo');
+                        }
+                    }}
                     className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:border-indigo-500 focus:outline-none"
                 >
                     <option value="human">Human</option>
@@ -1009,7 +1022,7 @@ function NewTicketForm({ onClose }: { onClose: () => void }) {
                 >
                     <option value="backlog">Backlog</option>
                     <option value="todo">Todo</option>
-                    <option value="ready_for_agent">Ready for Agent</option>
+                    {data.assigned_to === 'agent' && <option value="ready_for_agent">Ready for Agent</option>}
                     <option value="in_progress">In Progress</option>
                 </select>
                 <div className="sm:col-span-2">
