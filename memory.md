@@ -218,7 +218,57 @@ New `KanbanController` endpoints:
 - `routine_runs`, `task_events`, `psych_interventions`: ticket_path
 - `daily_checkins`: vault_note_path
 
-**Code**: VaultManager indexer no longer extracts ticket-only frontmatter; VaultNote model has no ticket scopes; AgentRun.vaultNote() relation removed; DailyCheckinService.saveDailyNote dead method removed; McpServer.toolSaveCheckin no longer writes a vault note. SkillLoader rewritten to use a filesystem path (no VaultManager dependency); skill source label changed `vault` → `file`. Dashboard's vault-folder config (`dashboard.vault.folders.*`) removed entirely; replaced by `dashboard.storage.{agent_outputs,skills}`.
+**Code**: VaultManager indexer no longer extracts ticket-only frontmatter; VaultNote model has no ticket scopes; AgentRun.vaultNote() relation removed; DailyCheckinService.saveDailyNote dead method removed; McpServer.toolSaveCheckin no longer writes a vault note. SkillLoader rewritten to use a filesystem path (no VaultManager dependency); skill source label changed `vault` → `file`. Dashboard's vault-folder config (`dashboard.vault.folders.*`) removed entirely; replaced by `dashboard.storage.{agent_outputs,skills,profile}`.
+
+### Phase 4: Postgres + Voyage embeddings + pgvector coach memory
+**DB switch**: SQLite → Postgres 18 (Laravel Herd's bundled Postgres on port 5432, user `root`, db `ai_dashboard`). pgvector 0.8.1 extension enabled. `migrate:fresh` ran — historical 8 backfill tickets / 5 agent runs / etc. discarded (test data). `routine_runs` migration filename bumped from `..._193130_...` to `..._193131_...` because Postgres orders FK creation strictly by filename. `DatabaseSeeder` now calls `AgentSkillSeeder` so the 5 default skills exist on a fresh DB.
+
+**Voyage embeddings** (composer dep `pgvector/pgvector`):
+- `App\Services\Embeddings\EmbeddingService` interface, `VoyageEmbeddingService` impl (POST `/v1/embeddings`, model `voyage-3-lite` default → 512 dims). Logs token usage to `cost_events` with `source='embedding'` when `AI_LOG_ENABLED=true`. Bound in `AppServiceProvider`.
+- Free Voyage tier is 3 RPM / 10k TPM — practically unusable. Steffi added a payment method to unlock standard limits; 200M Voyage-3 free tokens still apply. Cost is real but tiny.
+
+**Coach memory** (`coach_memories` table, `vector(512)` column):
+- HNSW index (NOT ivfflat — ivfflat needs training data and silently returns empty results for tiny datasets). Use `embedding <=> ?::vector` for cosine distance; the `?::vector` cast is required.
+- `App\Services\CoachMemoryService::store/recall/listRecent/delete`. Types: `session | insight | pattern | consolidation`.
+
+### Phase 5: Daily Coach in Claude Desktop (external)
+**Decision**: instead of building a custom in-dashboard chat UI for the daily coach, use Claude Desktop projects + the dashboard's MCP server. The dashboard provides context/persistence; Claude Desktop provides the conversational UX.
+
+- **Profile**: `Stefanie.md` content copied to `storage/app/private/dashboard/profile.md` (vault file untouched). Edit via Settings → Profile. MCP `get_biography` reads from this path.
+- **New MCP tools** (in `McpServer`): `recall_coach_memory(query, limit)`, `store_coach_memory(content, type, metadata)`, `list_recent_memories(limit)`, `get_recent_checkins(days)`, `get_psych_trends(days)`.
+- **Settings → Daily Coach**: project_id input + greeting textarea (default in DE). Deep-link is `claude://claude.ai/project/{id}?q={URL-encoded-greeting}` — pre-fills the input box; user still presses Enter once (Claude Desktop has no auto-send). Verified via support.claude.com docs.
+- **Settings → Coach Memory**: list of recent + semantic-search box (debounced live recall via `/api/settings/memories/search`) + delete.
+- **Daily page** is now hybrid: prominent "Daily Coach öffnen" deep-link button at the top + history list at bottom; the existing in-dashboard chat is collapsed by default and used as a fallback (kept dormant for the planned Ollama integration).
+- **Important**: when MCP tool definitions change, Claude Desktop must be **fully quit (Cmd+Q) and restarted** for new tools to appear.
+
+### Phase 6: Projects — autonomous nightly runs via claude code
+**Pattern**: each project = a path to a git repo + a canonical `nightly.md` file. A scheduled run reads `nightly.md`, creates a fresh `git worktree` on a new branch `nightly/<date>-<run_id>`, runs `claude -p --dangerously-skip-permissions` in that worktree, then snapshots `review.md` + the updated `nightly.md` back to canonical state.
+
+Worktrees keep Steffi's main working dir untouched. The worktree's `.dashboard/` folder is locally git-excluded (via `.git/worktrees/<name>/info/exclude`) so claude can't accidentally commit it. The branch sits in the repo for review/merge/discard via normal git workflow.
+
+**Schema**:
+- `projects(name unique, path, status active|paused|done, default_branch, allowed_tools, model, max_run_minutes, max_turns, nightly_enabled, nightly_schedule, consecutive_failures, last_run_at, paused_at)`
+- `project_runs(project_id, branch_name, worktree_path, status, started_at, completed_at, prompt, raw_output, summary, tokens_used, duration_seconds, error_message, review_ticket_id)`
+- `tickets.project_id` (nullable FK)
+
+**Service & command**:
+- `ProjectService::create()` validates path is a git repo with at least one commit, detects default branch (origin/HEAD → main → master → stage), sets up `storage/app/private/dashboard/projects/<name>/{nightly.md,review.md,log/}`.
+- `ProjectService::runNightly()` orchestrates the full worktree+claude+writeback+ticket flow. Auto-pauses the project after 2 consecutive failures.
+- `Console\Commands\NightlyProjects` (`projects:nightly`) iterates active projects sequentially. Wired to `Schedule::command(...)->dailyAt('02:00')->withoutOverlapping()`.
+- After a successful run with non-empty `review.md`: a Ticket is auto-created in status `review`, linked to the project (with project name as tag), description includes branch + worktree path + first 4000 chars of review.md.
+
+**Cost tracking**: `cost_events.source='project_nightly'`, tokens captured, `cost_usd=null` (Steffi has Claude Max plan covering compute). Voyage embeddings are the only real $ cost.
+
+**Path safety**: validated against `config('dashboard.projects.allowed_roots')` — currently `~/projekte` and `~/projekte/Herd`.
+
+**Initial projects**: `new_jetscout` (default_branch=main), `chimpworm` (default_branch=main, after Steffi made the initial commit). Anything else gets added via `/projects` UI.
+
+### Phase 7: Two-lane Kanban
+Visual split into Du (top, indigo) and Agent (bottom, purple) swim lanes. Same horizontal-scroll container so columns stay aligned (mostly).
+- Cross-lane drag updates `assigned_to` automatically (no confirmation — drag is explicit).
+- Per-lane filters: priority dropdown + tag chip multi-select, clientside on top of any URL filters.
+- `ready_for_agent` column is hidden in the human lane (humans don't get dispatched). The lanes have different column counts (5 vs 6) — Steffi explicitly preferred the misalignment over an empty spacer.
+- `KanbanController::move` accepts optional `assigned_to` (validated `human|agent`) and persists it before `TicketService::move` runs.
 
 ## Additional Database Tables
 - `tickets`: see Phase 2 above (the canonical kanban data)
@@ -226,46 +276,41 @@ New `KanbanController` endpoints:
 - `settings`: key (unique), value, type (string|integer|boolean|json), group
 - `psych_interventions`: framework, intervention_type, ticket_id, content, was_helpful, dismissed
 - `daily_checkins`: see Phase 1H above (vault_note_path column dropped in Phase 3)
-- `cost_events`: see Phase 1F above
+- `cost_events`: see Phase 1F (now with `source='embedding'` and `source='project_nightly'` rows too)
 - `dashboard_events`: id, type, payload (json), occurred_at — SSE event queue
 - `activity_log`: actor, action, subject_type, subject_id, details (json)
 - `routines`, `routine_runs`: see Phase 1I above
+- `coach_memories`: type, session_date, content, embedding `vector(512)` (HNSW cosine index), metadata json — Phase 4
+- `projects`, `project_runs`: see Phase 6 above
 
 ## Models
 - `Ticket` (canonical kanban model), `VaultNote` (slim — pure note index), `TaskEvent`, `Setting`, `AgentRun`, `AgentSkill`, `User`
 - `ActivityLog`, `CostEvent`, `DailyCheckin`, `PsychIntervention`, `Routine`, `RoutineRun`
+- `CoachMemory` (Phase 4), `Project`, `ProjectRun` (Phase 6)
 
 ## Enums
 - `TicketStatus` (6 values), `TicketPriority` (4 values)
 
 ## Route Structure
-Run `php artisan route:list` for the current set. Top-level pages: `/dashboard`, `/daily`, `/kanban`, `/vault`, `/agents`, `/routines`, `/skills`, `/settings`. API namespaces: `/api/kanban/*`, `/api/vault/*`, `/api/agents/*`, `/api/daily/*`, `/api/psych/*`, `/api/routines/*`, `/api/skills/*`, `/api/events/stream`.
+Run `php artisan route:list` for the current set. Top-level pages: `/dashboard`, `/daily`, `/kanban`, `/vault`, `/agents`, `/routines`, `/projects`, `/skills`, `/settings`. API namespaces: `/api/kanban/*`, `/api/vault/*`, `/api/agents/*`, `/api/daily/*`, `/api/psych/*`, `/api/routines/*`, `/api/skills/*`, `/api/settings/*`, `/api/events/stream`.
 
 ## What's NOT Built Yet
 
 ### Tests
-Only Breeze auth scaffolding tests exist. Needs at minimum: TicketService (create/move/postpone/delete), AgentOrchestrator::dispatchReadyTickets (with paused / WIP / dependencies), VaultManager atomic write, RoutineScheduler::dispatch, PsychEngine triggers.
+Only Breeze auth scaffolding tests exist. Needs at minimum: TicketService (create/move/postpone/delete), AgentOrchestrator::dispatchReadyTickets (with paused / WIP / dependencies), CoachMemoryService::recall (pgvector roundtrip with stub embedder), ProjectService::runNightly (mock claude -p), RoutineScheduler::dispatch, PsychEngine triggers.
 
-### Phase 2: Email Integration
-- `webklex/php-imap` for IMAP
-- `spatie/laravel-google-calendar` for Google Calendar
-- AI categorizes emails: actionable/informational/unimportant
-- Action items → kanban tickets
-- Daily digest email at 7am
-- `emails` table: message_id, from, subject, category, ai_summary, extracted_actions
+### Projects Phase 2-4 (deferred)
+- **2**: Async background runs via queue worker (today: synchronous when triggered manually from UI; cron-triggered nightly is fine because no browser waits)
+- **3**: MCP tools for Coach to read/write `nightly.md` (`read_project_file`, `write_project_file`, `list_projects`, `get_project_runs`) → Coach can plan nightly tasks during the daily check-in
+- **4**: Morning-Briefing routine (06:00) summarising overnight project_runs into a coach memory + DashboardEvent; UI worktree-cleanup button
 
-### Phase 3: Psychology Module
-- **Kahneman**: Tasks tagged system_level 1|2, flag System 2 tasks for focused blocks
-- **Chimp Paradox**: emotional_charge field, reframing interventions for high-charge tasks (phone calls), avoidance detection via postpone_count
-- **Strudelmodell/ZRM**: Somatic marker check-ins, resource activation, motto-goals
-- **Anti-procrastination**: Time-boxing for perfectionism, WIP limits (soft:3, hard:5) for shiny object, "park the idea" flow, progress celebrations
-- **Pattern detection**: Query task_events for postponement frequency, completion ratio, abandonment rate
-- **Trigger points**: Starting work on ticket, creating ticket when WIP high, completing task, dashboard load
-- Tables: `psych_interventions` (framework, intervention_type, content, was_helpful)
+### Email / Calendar / Telegram
+Discussed and explicitly **deprioritised** by Steffi (2026-05-07): not a current pain point. Real bottleneck is using the system with real projects + ADHS support. If revisited: Calendar first (smallest scope, highest leverage for the daily coach), Email second (only with concrete inbox use case), Telegram last (mobile capture).
 
-### Phase 4: Telegram Interface
-- Bot for quick capture, status checks, daily digest
-- Commands: /task, /status, /digest, /run
+### Build / Dev workflow
+- `npm run build` produces `public/build/` from the Vite manifest. Herd serves the built assets directly — **no `npm run dev` needed at runtime**. Run `npm run build` after frontend changes.
+- `npm run dev` only when actively iterating on React (HMR). `rm public/hot` if a stale dev-server marker is around.
+- `tsc && vite build` is the build pipeline. There were two pre-existing TS errors fixed in `4227f8b` so this works clean.
 
 ## npm Dependencies Added
 - `@hello-pangea/dnd` — drag-and-drop (maintained fork of react-beautiful-dnd)
@@ -277,17 +322,20 @@ Full detailed plan at: `/root/.claude/plans/sleepy-whistling-swing.md`
 
 ## Git Log (most recent)
 ```
+90b32a8 Drop the spacer that left a hole in the human lane
+7008990 Hide Ready-for-Agent column from human lane
+db6153a Split kanban board into human and agent swim lanes
+4227f8b Fix two TypeScript errors blocking npm run build
+1c08ba6 Add Projects: autonomous nightly runs via claude code in git worktrees
+4beada3 Add prefilled greeting to Daily Coach deep-link
+8331864 Add Daily Coach (Claude Desktop) integration: MCP tools, profile, settings UI
+0fcdc93 Add Voyage embedding service and pgvector-backed coach memory
+acab2ea Fix migration ordering for Postgres; seed agent skills by default
+73f2196 Update memory.md with phases 1K, 2, 3
 f5f0f07 Phase 3: drop legacy columns and dashboard-folder vault writes
 c66145d Phase 2b: switch frontend to ticket IDs
 4945be1 Phase 2a: switch backend services to Ticket model
 493bdff Phase 1: introduce tickets table, model, service (additive)
 2bff62c Build settings page v1: vault, agent, psychology, queue
-aba1bf7 Update memory.md with phases 1E–1J
-997bc86 Add skills UI, dashboard widgets, vault folder counts, MCP and serve commands
-71c526a Add routines: cron-driven recurring agent runs
-bdc6544 Add daily check-in chat and psychology engine
-ea078dd Add ticket detail, linking, meta editing, and deletion to kanban
-88831e5 Add skill loader, cost tracking, and prompt-builder context
-67c5ea4 Add activity log, dashboard event bus, and SSE event stream
-... (Phase 0–1D earlier)
+... (Phases 1E–1J and 0–1D earlier)
 ```
